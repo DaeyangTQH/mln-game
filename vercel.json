@@ -1,8 +1,12 @@
 {
-  "outputDirectory": "public",
-  "rewrites": [
-    { "source": "/host", "destination": "/host.html" },
-    { "source": "/player", "destination": "/player.html" },
-    { "source": "/", "destination": "/host.html" }
+  "version": 2,
+  "builds": [
+    { "src": "public/**", "use": "@vercel/static" }
+  ],
+  "routes": [
+    { "src": "^/$", "dest": "/public/host.html" },
+    { "src": "^/host$", "dest": "/public/host.html" },
+    { "src": "^/player$", "dest": "/public/player.html" },
+    { "src": "^/(.*)$", "dest": "/public/$1" }
   ]
 }
