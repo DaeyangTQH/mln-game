@@ -20,6 +20,9 @@ body {
   color: var(--text);
   overflow: hidden;
 }
+body.player-playing {
+  background: #081321;
+}
 button, input { font: inherit; }
 button {
   border: 0;
@@ -341,6 +344,13 @@ canvas { display: block; }
   place-items: center;
   touch-action: manipulation;
 }
+body.player-playing .player-page {
+  padding: 0;
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+}
 .player-card {
   width: min(480px, 100%);
   padding: 22px;
@@ -365,9 +375,32 @@ canvas { display: block; }
   grid-template-rows: auto 1fr auto auto;
   gap: 10px;
 }
+body.player-playing .player-hud {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  display: block;
+  overflow: hidden;
+}
 .status-card { padding: 16px; display: grid; grid-template-columns: 1fr auto; gap: 12px; align-items: center; }
+body.player-playing .status-card {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  left: max(10px, env(safe-area-inset-left));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 5;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(7, 17, 31, .58);
+  box-shadow: 0 10px 32px rgba(0,0,0,.24);
+  pointer-events: none;
+}
 .status-card h2 { margin: 0; font-size: 20px; }
 .status-card .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+body.player-playing .status-card h2 { font-size: 16px; }
+body.player-playing .status-card .sub { font-size: 11px; }
 .mini-map {
   position: relative;
   min-height: 0;
@@ -375,6 +408,15 @@ canvas { display: block; }
   border: 1px solid var(--line);
   background: #081321;
   overflow: hidden;
+}
+body.player-playing .mini-map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 #viewCanvas {
   display: block;
@@ -391,6 +433,15 @@ canvas { display: block; }
   gap: 8px;
   pointer-events: none;
 }
+body.player-playing .viewport-hud {
+  top: auto;
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  justify-content: flex-end;
+  z-index: 4;
+}
+body.player-playing .viewport-tag { display: none; }
 .viewport-tag,
 .viewport-stats {
   padding: 6px 10px;
@@ -419,6 +470,27 @@ canvas { display: block; }
   place-items: center;
   padding: 14px;
 }
+body.player-playing .joystick-wrap {
+  position: absolute;
+  left: max(14px, env(safe-area-inset-left));
+  bottom: max(14px, env(safe-area-inset-bottom));
+  z-index: 7;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  opacity: .46;
+  transition: opacity .16s ease, transform .16s ease;
+}
+body.player-playing .joystick-wrap:hover,
+body.player-playing .joystick-wrap:focus-within,
+body.player-playing .joystick-wrap:active {
+  opacity: .9;
+}
+body.player-playing .joystick-wrap .small {
+  display: none;
+}
 .joystick {
   width: 190px;
   height: 190px;
@@ -431,6 +503,13 @@ canvas { display: block; }
   -webkit-user-select: none;
   box-shadow: inset 0 0 40px rgba(56,189,248,.15);
   cursor: grab;
+}
+body.player-playing .joystick {
+  width: clamp(112px, 25vw, 150px);
+  height: clamp(112px, 25vw, 150px);
+  border-color: rgba(226,232,240,.28);
+  background: radial-gradient(circle at 50% 50%, rgba(56,189,248,.18), rgba(7,17,31,.22));
+  box-shadow: inset 0 0 28px rgba(56,189,248,.18), 0 10px 26px rgba(0,0,0,.22);
 }
 .joystick:active { cursor: grabbing; }
 .knob {
@@ -447,7 +526,25 @@ canvas { display: block; }
   box-shadow: 0 16px 34px rgba(56,189,248,.32);
   will-change: transform;
 }
+body.player-playing .knob {
+  width: 54px;
+  height: 54px;
+  margin-left: -27px;
+  margin-top: -27px;
+  background: rgba(56, 189, 248, .72);
+  box-shadow: 0 10px 24px rgba(56,189,248,.24);
+}
 .vote-buttons { display: grid; gap: 10px; }
+body.player-playing .vote-buttons {
+  position: absolute;
+  right: max(12px, env(safe-area-inset-right));
+  bottom: max(58px, calc(env(safe-area-inset-bottom) + 58px));
+  z-index: 8;
+  width: min(360px, calc(100vw - 24px));
+  padding: 10px;
+  border-radius: 16px;
+  background: rgba(7, 17, 31, .7);
+}
 .vote-buttons button { text-align: left; font-weight: 800; }
 .vote-buttons .selected { outline: 3px solid rgba(250,204,21,.6); }
 .small { color: var(--muted); font-size: 12px; }

@@ -38,6 +38,13 @@ window.GameSprites = (() => {
     license: 6,
   };
 
+  const RESOURCE_STYLE = {
+    capital: { fill: 'rgba(250, 204, 21, .34)', ring: '#fde047', glow: 'rgba(250, 204, 21, .62)' },
+    tech: { fill: 'rgba(45, 212, 191, .32)', ring: '#2dd4bf', glow: 'rgba(45, 212, 191, .58)' },
+    customer: { fill: 'rgba(244, 114, 182, .30)', ring: '#f472b6', glow: 'rgba(244, 114, 182, .56)' },
+    license: { fill: 'rgba(251, 146, 60, .34)', ring: '#fb923c', glow: 'rgba(251, 146, 60, .62)' },
+  };
+
   const INFRA_SPRITE = {
     electricity: 8,
     water: 9,
@@ -172,9 +179,19 @@ window.GameSprites = (() => {
   function drawResource(ctx, resource, x, y, radius) {
     const sprite = RESOURCE_SPRITE[resource.type] ?? 0;
     const size = Math.max(radius * RESOURCE_DIAMETER_SCALE, 12);
+    const style = RESOURCE_STYLE[resource.type] || RESOURCE_STYLE.capital;
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.35)';
-    ctx.shadowBlur = 3;
+    ctx.beginPath();
+    ctx.fillStyle = style.fill;
+    ctx.strokeStyle = style.ring;
+    ctx.lineWidth = Math.max(1.5, radius * 0.18);
+    ctx.shadowColor = style.glow;
+    ctx.shadowBlur = Math.max(5, radius * 0.7);
+    ctx.arc(x, y, radius * 1.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowColor = 'rgba(0,0,0,.5)';
+    ctx.shadowBlur = 4;
     drawSprite(ctx, 'icons', sprite, x, y, size);
     ctx.restore();
   }
@@ -182,9 +199,19 @@ window.GameSprites = (() => {
   function drawResourceScreen(ctx, resource, sx, sy, screenRadius) {
     const sprite = RESOURCE_SPRITE[resource.type] ?? 0;
     const size = Math.max(screenRadius * RESOURCE_DIAMETER_SCALE, 8);
+    const style = RESOURCE_STYLE[resource.type] || RESOURCE_STYLE.capital;
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.35)';
-    ctx.shadowBlur = 3;
+    ctx.beginPath();
+    ctx.fillStyle = style.fill;
+    ctx.strokeStyle = style.ring;
+    ctx.lineWidth = Math.max(1.5, screenRadius * 0.18);
+    ctx.shadowColor = style.glow;
+    ctx.shadowBlur = Math.max(5, screenRadius * 0.7);
+    ctx.arc(sx, sy, screenRadius * 1.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowColor = 'rgba(0,0,0,.5)';
+    ctx.shadowBlur = 4;
     drawSprite(ctx, 'icons', sprite, sx, sy, size);
     ctx.restore();
   }
@@ -237,6 +264,7 @@ window.GameSprites = (() => {
     EXPLAIN_SPRITES,
     MAP_DECORATIONS,
     RESOURCE_SPRITE,
+    RESOURCE_STYLE,
     LOGO_DIAMETER_SCALE,
     RESOURCE_DIAMETER_SCALE,
     PLAYER_SCREEN_RADIUS_RATIO,
