@@ -32,13 +32,13 @@ http://localhost:3000/host
 Người chơi dùng điện thoại/laptop mở:
 
 ```text
-http://<IP-máy-chủ>:3000
+http://<IP-máy-chủ>:3000/player
 ```
 
 Ví dụ nếu IP máy bạn là `192.168.1.20`, người chơi vào:
 
 ```text
-http://192.168.1.20:3000
+http://192.168.1.20:3000/player
 ```
 
 ## Luật chơi gợi ý khi thuyết trình

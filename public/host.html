@@ -22,11 +22,11 @@
         <div class="hc-qr-text">
           <strong>Quét QR để tham gia</strong>
           <span id="qrPlayerNote">0 người đã vào phòng</span>
-          <span class="hc-join-link" id="joinUrl" title="Nhấn để sửa link">http://localhost:3000</span>
+          <span class="hc-join-link" id="joinUrl" title="Nhấn để sửa link">http://localhost:3000/player</span>
         </div>
       </div>
       <div class="join-url-edit" id="joinUrlEdit">
-        <input type="url" id="joinUrlInput" placeholder="http://192.168.x.x:3000" />
+        <input type="url" id="joinUrlInput" placeholder="http://192.168.x.x:3000/player" />
         <button type="button" class="btn-secondary btn-sm" id="saveJoinUrl">Lưu</button>
       </div>
       <div class="hc-actions">
@@ -415,7 +415,7 @@
       document.getElementById('lobbyCount').textContent = state.playerCount ?? state.players.length;
       document.getElementById('qrPlayerNote').textContent = `${state.playerCount ?? state.players.length} người đã vào phòng`;
 
-      const joinUrl = state.joinUrl || location.origin.replace('/host', '');
+      const joinUrl = state.joinUrl || new URL('/player', location.origin).href;
       document.getElementById('joinUrl').textContent = `Link dự phòng: ${joinUrl}`;
       renderQr(joinUrl);
 

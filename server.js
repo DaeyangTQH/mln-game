@@ -7,10 +7,18 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-app.use(express.static('public'));
+app.use(express.static('public', { index: false }));
+
+app.get('/', (_req, res) => {
+  res.redirect('/host');
+});
 
 app.get('/host', (_req, res) => {
   res.sendFile(__dirname + '/public/host.html');
+});
+
+app.get('/player', (_req, res) => {
+  res.sendFile(__dirname + '/public/player.html');
 });
 
 const PORT = process.env.PORT || 3000;
@@ -93,8 +101,8 @@ function getPreferredLanIp() {
 function getJoinUrl(game) {
   if (game.customJoinUrl) return game.customJoinUrl;
   const ip = getPreferredLanIp();
-  if (ip) return `http://${ip}:${PORT}`;
-  return `http://localhost:${PORT}`;
+  const base = ip ? `http://${ip}:${PORT}` : `http://localhost:${PORT}`;
+  return `${base}/player`;
 }
 
 function chooseResourceType() {
@@ -461,9 +469,9 @@ server.listen(PORT, '0.0.0.0', () => {
   const lan = getLANAddresses();
   console.log(`\nMonopoly Market Arena running!`);
   console.log(`Host screen: http://localhost:${PORT}/host`);
-  console.log(`Player screen: http://localhost:${PORT}`);
+  console.log(`Player screen: http://localhost:${PORT}/player`);
   if (lan.length) {
     console.log(`\nLocal network URLs:`);
-    lan.forEach(ip => console.log(`Host:   http://${ip}:${PORT}/host\nPlayer: http://${ip}:${PORT}`));
+    lan.forEach(ip => console.log(`Host:   http://${ip}:${PORT}/host\nPlayer: http://${ip}:${PORT}/player`));
   }
 });
