@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nuốt Thị Trường — Màn hình lớp học</title>
+  <link rel="stylesheet" href="/host-classroom.css" />
+</head>
+<body class="host-classroom" id="hostBody">
+  <div class="hc-layout" id="hostLayout">
+    <header class="hc-topbar" id="hostTopbar">
+      <div class="hc-brand">Nuốt Thị Trường</div>
+      <div class="hc-divider"></div>
+      <div class="hc-stat" id="phaseStat">Giai đoạn 1: Cạnh tranh tự do</div>
+      <div class="hc-divider"></div>
+      <div class="hc-stat"><span class="label">Người chơi:</span> <span id="playerCount">0</span></div>
+      <div class="hc-divider"></div>
+      <div class="hc-timer" id="timerDisplay">05:00</div>
+      <div class="hc-divider"></div>
+      <div class="hc-qr-wrap">
+        <div id="qrCode" title="Quét QR để tham gia"></div>
+        <div class="hc-qr-text">
+          <strong>Quét QR để tham gia</strong>
+          <span id="qrPlayerNote">0 người đã vào phòng</span>
+          <span class="hc-join-link" id="joinUrl" title="Nhấn để sửa link">http://localhost:3000</span>
+        </div>
+      </div>
+      <div class="join-url-edit" id="joinUrlEdit">
+        <input type="url" id="joinUrlInput" placeholder="http://192.168.x.x:3000" />
+        <button type="button" class="btn-secondary btn-sm" id="saveJoinUrl">Lưu</button>
+      </div>
+      <div class="hc-actions">
+        <button type="button" class="btn-primary btn-md" id="startGame">Bắt đầu game</button>
+        <button type="button" class="btn-primary btn-md" id="nextPhase">Chuyển giai đoạn</button>
+        <button type="button" class="btn-secondary btn-sm" id="pause">Tạm dừng</button>
+        <button type="button" class="btn-warn btn-sm" id="reset">Chơi lại</button>
+        <div class="hc-settings">
+          <button type="button" class="btn-ghost btn-sm" id="settingsBtn">Cài đặt hiển thị ▾</button>
+          <div class="hc-settings-menu" id="settingsMenu">
+            <label><input type="checkbox" data-panel="topbar" checked /> Thanh trên</label>
+            <label><input type="checkbox" data-panel="sidebar" checked /> Chỉ số thị trường</label>
+            <label><input type="checkbox" data-panel="bottom" checked /> Giải thích kiến thức</label>
+            <label><input type="checkbox" data-panel="vote" checked /> Bình chọn</label>
+            <label><input type="checkbox" id="editJoinUrl" /> Sửa link tham gia</label>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="hc-main" id="hostMain">
+      <div class="hc-map-frame" id="hostStage">
+        <canvas id="gameCanvas"></canvas>
+        <div class="hc-lobby-overlay" id="lobbyOverlay">
+          <div>
+            <h2>Đang chờ người chơi…</h2>
+            <p>Quét QR để tham gia · <span id="lobbyCount">0</span> người đã vào phòng</p>
+            <button type="button" class="btn-primary" id="startGameLobby">Bắt đầu game</button>
+          </div>
+        </div>
+      </div>
+
+      <aside class="hc-sidebar" id="hostSidebar">
+        <div class="hc-card">
+          <div class="hc-card-title">Chỉ số thị trường</div>
+          <div class="hc-metrics">
+            <div class="hc-metric">
+              <div class="m-label">Người chơi</div>
+              <div class="m-value" id="metricPlayers">0</div>
+            </div>
+            <div class="hc-metric">
+              <div class="m-label">Đã bị thâu tóm</div>
+              <div class="m-value" id="metricSwallowed">0</div>
+            </div>
+            <div class="hc-metric full">
+              <div class="m-label">Doanh nghiệp dẫn đầu</div>
+              <div class="m-value sm" id="metricLeader">—</div>
+            </div>
+            <div class="hc-metric">
+              <div class="m-label">Mức độc quyền</div>
+              <div class="m-value" id="monopolyLevel">Thấp</div>
+            </div>
+            <div class="hc-metric">
+              <div class="m-label">Giá dịch vụ</div>
+              <div class="m-value" id="priceIndex">100</div>
+            </div>
+            <div class="hc-metric">
+              <div class="m-label">Hài lòng người dân</div>
+              <div class="m-value" id="happiness">100</div>
+            </div>
+            <div class="hc-metric full">
+              <div class="m-label">Lưới điện</div>
+              <div class="m-value sm" id="gridOwner">chưa ai</div>
+            </div>
+            <div class="hc-metric full">
+              <div class="m-label">Đường ống nước</div>
+              <div class="m-value sm" id="pipeOwner">chưa ai</div>
+            </div>
+          </div>
+        </div>
+        <div class="hc-card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+          <div class="hc-card-title">Doanh nghiệp dẫn đầu</div>
+          <div id="leaderboard" class="leaderboard"></div>
+        </div>
+        <div class="hc-card">
+          <div class="hc-card-title">Sự kiện gần đây</div>
+          <div id="events" class="events"></div>
+        </div>
+      </aside>
+    </div>
+
+    <footer class="hc-bottom" id="hostBottom">
+      <div class="hc-explain-bar">
+        <div class="hc-explain-text" id="explainShort">Giai đoạn 1: Cạnh tranh tự do — doanh nghiệp thu thập vốn, công nghệ, khách hàng để lớn mạnh.</div>
+        <button type="button" class="btn-secondary btn-sm" id="toggleExplain">Giải thích</button>
+      </div>
+      <div class="hc-explain-detail" id="explainDetail">
+        <div class="explain-flow" id="explainFlow">Cạnh tranh tự do → Tích tụ vốn → Tập trung sản xuất → Độc quyền</div>
+        <div class="explain-grid" id="explainGrid"></div>
+      </div>
+    </footer>
+
+    <section class="hc-vote hide" id="votePanel">
+      <div class="hc-card-title">Bình chọn chính sách</div>
+      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Nhà nước có nên can thiệp khi điện/nước bị một doanh nghiệp kiểm soát?</div>
+      <div class="vote-bar"><span>A</span><div class="vote-track"><div class="vote-fill" id="voteA"></div></div><span id="voteACount">0</span></div>
+      <div class="vote-bar"><span>B</span><div class="vote-track"><div class="vote-fill" id="voteB"></div></div><span id="voteBCount">0</span></div>
+      <div class="vote-bar"><span>C</span><div class="vote-track"><div class="vote-fill" id="voteC"></div></div><span id="voteCCount">0</span></div>
+      <div style="margin-top:8px;font-size:12px;color:var(--hc-text-muted)">A: Để thị trường tự xử lý · B: Nhà nước giữ toàn bộ · C: Nhà nước giữ khâu cốt lõi, tư nhân tham gia phần phù hợp</div>
+    </section>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+  <script src="/game-sprites.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    const hostBody = document.getElementById('hostBody');
+    const hostLayout = document.getElementById('hostLayout');
+    const hostStage = document.getElementById('hostStage');
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const PROJECTOR_SCALE = 1.38;
+
+    let state = null;
+    let camera = { x: 0, y: 0, scale: 0.58 };
+    let lastJoinUrl = '';
+    const mapImage = new Image();
+    let mapReady = false;
+    mapImage.onload = () => { mapReady = true; };
+    mapImage.src = GameSprites.ASSET.tiles.island;
+    GameSprites.loadAll();
+
+    const PHASE_EXPLAIN = {
+      1: {
+        short: 'Giai đoạn 1: Cạnh tranh tự do — doanh nghiệp thu thập vốn, công nghệ, khách hàng để lớn mạnh.',
+        flow: 'Cạnh tranh tự do → Tích tụ vốn → Tập trung sản xuất → Độc quyền',
+        cards: [
+          { title: 'Vốn', sub: 'Tích tụ tư bản', sheet: 'policy', index: 14 },
+          { title: 'Công nghệ', sub: 'Lực lượng sản xuất', sheet: 'icons', index: 2 },
+          { title: 'Khách hàng', sub: 'Thị phần tiêu dùng', sheet: 'icons', index: 4 },
+        ],
+      },
+      2: {
+        short: 'Giai đoạn 2: Độc quyền hạ tầng — ai nắm lưới điện và đường ống nước sẽ có quyền lực đặc biệt.',
+        flow: 'Tích tụ vốn → Hạ tầng chiến lược → Độc quyền tự nhiên → Quyền lực thị trường',
+        cards: [
+          { title: 'Vốn', sub: 'Tích tụ tư bản', sheet: 'policy', index: 14 },
+          { title: 'Công nghệ', sub: 'Lực lượng sản xuất', sheet: 'icons', index: 2 },
+          { title: 'Khách hàng', sub: 'Thị phần tiêu dùng', sheet: 'icons', index: 4 },
+          { title: 'Lưới điện', sub: 'Hạ tầng chiến lược', sheet: 'policy', index: 11 },
+          { title: 'Đường ống nước', sub: 'Độc quyền tự nhiên', sheet: 'policy', index: 12 },
+        ],
+      },
+      3: {
+        short: 'Giai đoạn 3: Chính sách công — cả lớp bình chọn cách Nhà nước điều tiết thị trường.',
+        flow: 'Độc quyền → Bất bình đẳng → Bình chọn chính sách → Điều tiết Nhà nước',
+        cards: [
+          { title: 'Chính sách Nhà nước', sub: 'Can thiệp công', sheet: 'policy', index: 6 },
+          { title: 'Bình chọn', sub: 'Dân chủ thị trường', sheet: 'policy', index: 7 },
+          { title: 'Điều tiết', sub: 'Cân bằng lợi ích', sheet: 'policy', index: 8 },
+        ],
+      },
+    };
+
+    const panelState = { topbar: true, sidebar: true, bottom: true, vote: true };
+    const monoClass = { 'Thấp': 'mono-low', 'Trung bình': 'mono-mid', 'Cao': 'mono-high', 'Rất cao': 'mono-very' };
+
+    function formatTime(ms) {
+      const total = Math.max(0, Math.floor(ms / 1000));
+      const m = String(Math.floor(total / 60)).padStart(2, '0');
+      const s = String(total % 60).padStart(2, '0');
+      return `${m}:${s}`;
+    }
+
+    function stageSize() {
+      const rect = hostStage.getBoundingClientRect();
+      return { w: Math.max(1, rect.width), h: Math.max(1, rect.height) };
+    }
+
+    function applyPanelVisibility() {
+      hostBody.classList.toggle('ui-hide-topbar', !panelState.topbar);
+      hostBody.classList.toggle('ui-hide-sidebar', !panelState.sidebar);
+      hostBody.classList.toggle('ui-hide-bottom', !panelState.bottom);
+      hostBody.classList.toggle('ui-hide-vote', !panelState.vote);
+      document.querySelectorAll('[data-panel]').forEach(cb => {
+        if (cb.type === 'checkbox') cb.checked = panelState[cb.dataset.panel];
+      });
+      requestAnimationFrame(resize);
+    }
+
+    document.querySelectorAll('[data-panel]').forEach(cb => {
+      cb.addEventListener('change', () => {
+        panelState[cb.dataset.panel] = cb.checked;
+        applyPanelVisibility();
+        if (state) updateUI();
+      });
+    });
+
+    document.getElementById('settingsBtn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      document.getElementById('settingsMenu').classList.toggle('open');
+    });
+    document.addEventListener('click', () => {
+      document.getElementById('settingsMenu').classList.remove('open');
+    });
+    document.getElementById('settingsMenu').addEventListener('click', e => e.stopPropagation());
+
+    document.getElementById('editJoinUrl').addEventListener('change', (e) => {
+      document.getElementById('joinUrlEdit').classList.toggle('open', e.target.checked);
+      if (e.target.checked && state) {
+        document.getElementById('joinUrlInput').value = state.joinUrl || '';
+      }
+    });
+
+    function resize() {
+      const { w, h } = stageSize();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.floor(w * dpr);
+      canvas.height = Math.floor(h * dpr);
+      canvas.style.width = `${w}px`;
+      canvas.style.height = `${h}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      fitWorld();
+    }
+    window.addEventListener('resize', resize);
+    new ResizeObserver(resize).observe(hostStage);
+
+    function fitWorld() {
+      if (!state) return;
+      const { w, h } = stageSize();
+      const scaleX = w / state.world.width;
+      const scaleY = h / state.world.height;
+      camera.scale = Math.min(scaleX, scaleY) * 0.99;
+      camera.x = (w - state.world.width * camera.scale) / 2;
+      camera.y = (h - state.world.height * camera.scale) / 2;
+    }
+
+    function worldToScreen(x, y) {
+      return { x: camera.x + x * camera.scale, y: camera.y + y * camera.scale };
+    }
+
+    function drawMap() {
+      if (!state) return;
+      ctx.save();
+      ctx.translate(camera.x, camera.y);
+      ctx.scale(camera.scale, camera.scale);
+      if (mapReady) {
+        ctx.drawImage(mapImage, 0, 0, state.world.width, state.world.height);
+      } else {
+        ctx.fillStyle = '#2a4038';
+        ctx.fillRect(0, 0, state.world.width, state.world.height);
+      }
+      ctx.strokeStyle = 'rgba(255,255,255,.08)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(0, 0, state.world.width, state.world.height);
+      ctx.restore();
+    }
+
+    function drawDecorations() {
+      if (!GameSprites.isReady()) return;
+      ctx.save();
+      ctx.translate(camera.x, camera.y);
+      ctx.scale(camera.scale, camera.scale);
+      for (const d of GameSprites.MAP_DECORATIONS) {
+        GameSprites.drawSprite(ctx, d.sheet, d.index, d.x, d.y, d.size, { alpha: 0.88 });
+      }
+      ctx.restore();
+    }
+
+    function drawGlow(sx, sy, r, color) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.35;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(sx, sy, r + 2, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,.85)';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function resourceGlowColor(type) {
+      const map = { capital: '#D9A441', tech: '#6B9AC4', customer: '#90B8A0', license: '#D98C7A' };
+      return map[type] || '#fff';
+    }
+
+    function drawResource(r) {
+      const p = worldToScreen(r.x, r.y);
+      const screenR = Math.max(5, r.radius * camera.scale * PROJECTOR_SCALE);
+      drawGlow(p.x, p.y, screenR, resourceGlowColor(r.type));
+      if (GameSprites.isReady()) {
+        GameSprites.drawResourceScreen(ctx, r, p.x, p.y, screenR);
+        return;
+      }
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = r.color;
+      ctx.arc(p.x, p.y, screenR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    function drawInfrastructure(i) {
+      if (state.phase < 2) return;
+      const p = worldToScreen(i.x, i.y);
+      const screenR = Math.max(12, i.radius * camera.scale * 0.9);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.scale(1 / camera.scale, 1 / camera.scale);
+      const glow = i.type === 'electricity' ? 'rgba(242,201,76,.45)' : 'rgba(114,183,201,.45)';
+      ctx.beginPath();
+      ctx.fillStyle = glow;
+      ctx.arc(0, 0, i.radius + 12, 0, Math.PI * 2);
+      ctx.fill();
+      if (GameSprites.isReady()) {
+        GameSprites.drawInfrastructure(ctx, i, 0, 0, i.radius);
+      }
+      ctx.restore();
+    }
+
+    function drawPlayer(p) {
+      const pos = worldToScreen(p.x, p.y);
+      const screenR = Math.max(10, p.radius * camera.scale * PROJECTOR_SCALE);
+      drawGlow(pos.x, pos.y, screenR, p.color || '#7BA392');
+      ctx.save();
+      if (GameSprites.isReady()) {
+        GameSprites.drawPlayerScreen(ctx, p, pos.x, pos.y, screenR);
+      } else {
+        ctx.beginPath();
+        ctx.fillStyle = p.color;
+        ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      const labelY = pos.y - screenR - 10;
+      const nameSize = Math.max(13, screenR * 0.42);
+      ctx.font = `900 ${nameSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#f4faf6';
+      ctx.strokeStyle = 'rgba(35,53,47,.9)';
+      ctx.lineWidth = 4;
+      ctx.strokeText(p.name, pos.x, labelY);
+      ctx.fillText(p.name, pos.x, labelY);
+      ctx.font = `700 ${Math.max(11, screenR * 0.3)}px sans-serif`;
+      ctx.fillStyle = 'rgba(255,255,255,.9)';
+      ctx.fillText(`${Math.round(p.mass)} lực`, pos.x, pos.y + screenR * 0.38);
+      ctx.restore();
+    }
+
+    function render() {
+      const { w, h } = stageSize();
+      ctx.clearRect(0, 0, w, h);
+      drawMap();
+      drawDecorations();
+      if (state) {
+        state.resources.forEach(drawResource);
+        state.infrastructures.forEach(drawInfrastructure);
+        state.players.slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
+      }
+      requestAnimationFrame(render);
+    }
+    render();
+
+    function renderQr(url) {
+      if (!url || url === lastJoinUrl) return;
+      lastJoinUrl = url;
+      const el = document.getElementById('qrCode');
+      el.innerHTML = '';
+      if (typeof QRCode !== 'undefined') {
+        QRCode.toCanvas(url, { width: 64, margin: 1, color: { dark: '#23352F', light: '#FFFFFF' } }, (err, canvasEl) => {
+          if (!err && canvasEl) el.appendChild(canvasEl);
+        });
+      }
+    }
+
+    function renderExplainGrid(phase) {
+      const info = PHASE_EXPLAIN[phase] || PHASE_EXPLAIN[1];
+      document.getElementById('explainGrid').innerHTML = info.cards.map(card => `
+        <div class="explain-card">
+          <span class="sprite-chip" data-sheet="${card.sheet}" data-idx="${card.index}"></span>
+          <div><strong>${card.title}</strong><span>${card.sub}</span></div>
+        </div>
+      `).join('');
+    }
+
+    function updateUI() {
+      if (!state) return;
+
+      const phaseLabel = `Giai đoạn ${state.phase}: ${state.phaseName}`;
+      document.getElementById('phaseStat').textContent = phaseLabel;
+      document.getElementById('playerCount').textContent = state.playerCount ?? state.players.length;
+      document.getElementById('lobbyCount').textContent = state.playerCount ?? state.players.length;
+      document.getElementById('qrPlayerNote').textContent = `${state.playerCount ?? state.players.length} người đã vào phòng`;
+
+      const joinUrl = state.joinUrl || location.origin.replace('/host', '');
+      document.getElementById('joinUrl').textContent = `Link dự phòng: ${joinUrl}`;
+      renderQr(joinUrl);
+
+      const inLobby = !state.gameStarted;
+      document.getElementById('lobbyOverlay').classList.toggle('hide', !inLobby);
+      document.getElementById('startGame').classList.toggle('hide', !inLobby);
+      document.getElementById('startGameLobby').disabled = (state.playerCount ?? 0) === 0;
+
+      const timerMs = state.gameStarted ? state.remainingMs : state.sessionDurationMs;
+      document.getElementById('timerDisplay').textContent = formatTime(timerMs);
+
+      document.getElementById('pause').textContent = state.running ? 'Tạm dừng' : 'Tiếp tục';
+      document.getElementById('pause').disabled = !state.gameStarted;
+      document.getElementById('nextPhase').disabled = !state.gameStarted;
+
+      document.getElementById('metricPlayers').textContent = state.playerCount ?? state.players.length;
+      document.getElementById('metricSwallowed').textContent = state.metrics.swallowed ?? 0;
+
+      const leader = state.leaderboard[0];
+      const leaderText = leader ? `${leader.name} · ${leader.share}%` : '—';
+      document.getElementById('metricLeader').textContent = leaderText;
+
+      const monoEl = document.getElementById('monopolyLevel');
+      monoEl.textContent = state.metrics.monopolyLevel;
+      monoEl.className = 'm-value ' + (monoClass[state.metrics.monopolyLevel] || 'mono-low');
+
+      document.getElementById('priceIndex').textContent = state.metrics.priceIndex;
+      document.getElementById('happiness').textContent = state.metrics.citizenHappiness;
+      document.getElementById('gridOwner').textContent = state.metrics.gridOwner || (state.phase < 2 ? 'chưa xuất hiện' : 'chưa ai');
+      document.getElementById('pipeOwner').textContent = state.metrics.pipeOwner || (state.phase < 2 ? 'chưa xuất hiện' : 'chưa ai');
+
+      const info = PHASE_EXPLAIN[state.phase] || PHASE_EXPLAIN[1];
+      document.getElementById('explainShort').textContent = info.short;
+      document.getElementById('explainFlow').textContent = info.flow;
+      renderExplainGrid(state.phase);
+
+      document.getElementById('leaderboard').innerHTML = state.leaderboard.map(p => `
+        <div class="leader-row">
+          <span>#${p.rank}</span>
+          <span><i class="sprite-chip logo-chip" data-sheet="logos" data-idx="${p.logoIndex ?? 0}"></i>${p.name}</span>
+          <strong>${p.share}%</strong>
+        </div>
+      `).join('') || '<div style="font-size:13px;color:var(--hc-text-muted)">Chưa có doanh nghiệp.</div>';
+
+      document.getElementById('events').innerHTML = state.events.map(e => `
+        <div class="event-row ${e.severity}">${e.message}</div>
+      `).join('') || '<div style="font-size:13px;color:var(--hc-text-muted)">Chưa có sự kiện.</div>';
+
+      const vp = document.getElementById('votePanel');
+      const showVote = state.phase === 3 && panelState.vote && state.gameStarted;
+      vp.classList.toggle('hide', !showVote);
+      const total = Math.max(1, state.voteCounts.A + state.voteCounts.B + state.voteCounts.C);
+      ['A', 'B', 'C'].forEach(k => {
+        document.getElementById(`vote${k}`).style.width = `${state.voteCounts[k] / total * 100}%`;
+        document.getElementById(`vote${k}Count`).textContent = state.voteCounts[k];
+      });
+    }
+
+    socket.on('state', s => {
+      state = s;
+      fitWorld();
+      updateUI();
+    });
+
+    function startGame() {
+      socket.emit('hostAction', 'startGame');
+    }
+    document.getElementById('startGame').onclick = startGame;
+    document.getElementById('startGameLobby').onclick = startGame;
+
+    document.getElementById('nextPhase').onclick = () => socket.emit('hostAction', 'nextPhase');
+    document.getElementById('pause').onclick = () => socket.emit('hostAction', 'pause');
+    document.getElementById('reset').onclick = () => {
+      if (confirm('Bạn có chắc muốn chơi lại từ đầu không?')) {
+        socket.emit('hostAction', 'reset');
+        document.getElementById('explainDetail').classList.remove('open');
+      }
+    };
+
+    document.getElementById('joinUrl').onclick = () => {
+      document.getElementById('editJoinUrl').checked = true;
+      document.getElementById('joinUrlEdit').classList.add('open');
+      document.getElementById('joinUrlInput').value = state?.joinUrl || '';
+    };
+    document.getElementById('saveJoinUrl').onclick = () => {
+      const url = document.getElementById('joinUrlInput').value.trim();
+      socket.emit('hostAction', { action: 'setJoinUrl', url });
+      lastJoinUrl = '';
+    };
+
+    document.getElementById('toggleExplain').onclick = () => {
+      document.getElementById('explainDetail').classList.toggle('open');
+    };
+
+    applyPanelVisibility();
+  </script>
+</body>
+</html>

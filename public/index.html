@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Nuốt Thị Trường - Player</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <main class="player-page">
+    <section class="panel player-card" id="joinCard">
+      <div class="kicker">Monopoly Market Arena</div>
+      <h1>Nuốt Thị Trường</h1>
+      <p>Bạn là một doanh nghiệp nhỏ. Hãy thu thập vốn, công nghệ, khách hàng để lớn lên. Khi đủ lớn, bạn có thể thâu tóm doanh nghiệp nhỏ hơn.</p>
+      <input id="nameInput" maxlength="24" placeholder="Tên doanh nghiệp của bạn" />
+      <div class="section-title" style="margin-top:4px">Chọn logo doanh nghiệp</div>
+      <div class="logo-picker" id="logoPicker"></div>
+      <button id="joinBtn" style="width:100%">Gia nhập thị trường</button>
+      <p class="small" style="margin-top:12px">Gợi ý tên: Tổng tài Aqua, Điện Sấm Sét, Nước Đại Phát, Market Boss...</p>
+    </section>
+
+    <section class="player-hud hide" id="hud">
+      <div class="panel status-card">
+        <div>
+          <h2 id="playerName">Doanh nghiệp</h2>
+          <div class="sub" id="phaseText">Giai đoạn 1 · Cạnh tranh tự do</div>
+        </div>
+        <div style="text-align:right">
+          <div class="kicker">Điểm</div>
+          <div style="font-size:28px;font-weight:950" id="score">0</div>
+        </div>
+      </div>
+
+      <div class="mini-map panel">
+        <canvas id="viewCanvas" aria-label="Khu vực xung quanh doanh nghiệp của bạn"></canvas>
+        <div class="viewport-hud">
+          <div class="viewport-tag">Tầm nhìn hạn chế</div>
+          <div class="viewport-stats" id="viewportStats">Quy mô: —</div>
+        </div>
+        <div class="viewport-overlay hide" id="viewportOverlay">
+          <div>
+            <span class="sprite-chip" data-sheet="policy" data-idx="6" style="width:48px;height:48px"></span>
+            <strong>Bạn vừa bị thâu tóm</strong>
+            <p class="small">Đang tái gia nhập thị trường...</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel joystick-wrap">
+        <div class="joystick" id="joystick"><div class="knob" id="knob"></div></div>
+        <div class="small" style="margin-top:10px;text-align:center">Kéo joystick hoặc dùng WASD. Bạn chỉ thấy khu vực gần mình — màn host hiển thị toàn bộ đảo.</div>
+      </div>
+
+      <div class="panel vote-buttons hide" id="voteButtons">
+        <div class="section-title">Vote chính sách</div>
+        <button data-vote="A" class="secondary">A. Không can thiệp, để thị trường tự xử lý</button>
+        <button data-vote="B" class="secondary">B. Nhà nước giữ toàn bộ</button>
+        <button data-vote="C" class="green">C. Nhà nước giữ khâu cốt lõi, tư nhân tham gia phần phù hợp</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="/game-sprites.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+    let myId = null;
+    let state = null;
+    let currentVote = null;
+    let selectedLogo = 0;
+    const joinCard = document.getElementById('joinCard');
+    const hud = document.getElementById('hud');
+    const joystick = document.getElementById('joystick');
+    const knob = document.getElementById('knob');
+    const voteButtons = document.getElementById('voteButtons');
+    const viewCanvas = document.getElementById('viewCanvas');
+    const viewCtx = viewCanvas.getContext('2d');
+    const viewportOverlay = document.getElementById('viewportOverlay');
+    const viewportStats = document.getElementById('viewportStats');
+    const mapImage = new Image();
+    let mapReady = false;
+    mapImage.onload = () => { mapReady = true; };
+    mapImage.src = GameSprites.ASSET.tiles.island;
+    GameSprites.loadAll();
+    GameSprites.buildLogoPicker(document.getElementById('logoPicker'), idx => { selectedLogo = idx; }, 0);
+
+    document.getElementById('joinBtn').onclick = join;
+    document.getElementById('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
+
+    function join() {
+      const name = document.getElementById('nameInput').value.trim() || 'Doanh nghiệp mới';
+      socket.emit('joinGame', { name, logoIndex: selectedLogo });
+      document.getElementById('joinBtn').textContent = 'Đang vào thị trường...';
+    }
+
+    socket.on('joined', ({ id, player }) => {
+      myId = id;
+      joinCard.classList.add('hide');
+      hud.classList.remove('hide');
+      document.getElementById('playerName').textContent = player.name;
+      if (document.activeElement) document.activeElement.blur();
+      startControlLoop();
+      resizeViewport();
+      requestAnimationFrame(renderViewport);
+    });
+
+    socket.on('state', s => {
+      state = s;
+      if (!myId) return;
+      const me = state.players.find(p => p.id === myId);
+      document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
+      voteButtons.classList.toggle('hide', state.phase !== 3);
+      if (me) {
+        document.getElementById('score').textContent = me.score;
+        viewportStats.textContent = `Quy mô: ${Math.round(me.mass)} · Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
+        viewportOverlay.classList.toggle('hide', me.alive);
+      }
+    });
+
+    function resizeViewport() {
+      const box = viewCanvas.parentElement.getBoundingClientRect();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      viewCanvas.width = Math.max(1, Math.floor(box.width * dpr));
+      viewCanvas.height = Math.max(1, Math.floor(box.height * dpr));
+      viewCanvas.style.width = `${box.width}px`;
+      viewCanvas.style.height = `${box.height}px`;
+      viewCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    window.addEventListener('resize', resizeViewport);
+    new ResizeObserver(resizeViewport).observe(viewCanvas.parentElement);
+
+    function viewHalfFor(me, w, h) {
+      return GameSprites.playerViewHalf(me ? me.radius : 18, Math.min(w, h));
+    }
+
+    function inView(x, y, cx, cy, margin = 60, half = 300) {
+      return Math.abs(x - cx) <= half + margin && Math.abs(y - cy) <= half + margin;
+    }
+
+    function renderViewport() {
+      const box = viewCanvas.parentElement.getBoundingClientRect();
+      const w = box.width;
+      const h = box.height;
+      viewCtx.clearRect(0, 0, w, h);
+
+      if (!state || !myId || w < 1 || h < 1) {
+        requestAnimationFrame(renderViewport);
+        return;
+      }
+
+      const me = state.players.find(p => p.id === myId);
+      if (!me) {
+        requestAnimationFrame(renderViewport);
+        return;
+      }
+
+      const viewHalf = viewHalfFor(me, w, h);
+      const scale = Math.min(w, h) / (viewHalf * 2);
+      const cx = w / 2;
+      const cy = h / 2;
+
+      viewCtx.save();
+      viewCtx.translate(cx, cy);
+      viewCtx.scale(scale, scale);
+      viewCtx.translate(-me.x, -me.y);
+
+      if (mapReady) {
+        viewCtx.drawImage(mapImage, 0, 0, state.world.width, state.world.height);
+      } else {
+        viewCtx.fillStyle = '#081321';
+        viewCtx.fillRect(0, 0, state.world.width, state.world.height);
+      }
+
+      for (const r of state.resources) {
+        if (!inView(r.x, r.y, me.x, me.y, 60, viewHalf)) continue;
+        if (GameSprites.isReady()) {
+          GameSprites.drawResource(viewCtx, r, r.x, r.y, r.radius);
+        } else {
+          viewCtx.beginPath();
+          viewCtx.fillStyle = r.color;
+          viewCtx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+          viewCtx.fill();
+        }
+      }
+
+      if (state.phase >= 2) {
+        for (const infra of state.infrastructures) {
+          if (!inView(infra.x, infra.y, me.x, me.y, infra.radius, viewHalf)) continue;
+          viewCtx.beginPath();
+          viewCtx.fillStyle = infra.type === 'electricity' ? 'rgba(250,204,21,.18)' : 'rgba(56,189,248,.18)';
+          viewCtx.arc(infra.x, infra.y, infra.radius, 0, Math.PI * 2);
+          viewCtx.fill();
+          if (GameSprites.isReady()) {
+            GameSprites.drawInfrastructure(viewCtx, infra, infra.x, infra.y, infra.radius);
+          }
+        }
+      }
+
+      const others = state.players.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
+      for (const p of others) {
+        if (!inView(p.x, p.y, me.x, me.y, p.radius, viewHalf)) continue;
+        if (GameSprites.isReady()) {
+          GameSprites.drawPlayer(viewCtx, p, p.x, p.y, p.radius);
+        } else {
+          viewCtx.beginPath();
+          viewCtx.fillStyle = p.color;
+          viewCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          viewCtx.fill();
+        }
+        viewCtx.font = `700 ${12 / scale}px sans-serif`;
+        viewCtx.textAlign = 'center';
+        viewCtx.fillStyle = '#fff';
+        viewCtx.strokeStyle = 'rgba(0,0,0,.7)';
+        viewCtx.lineWidth = 3 / scale;
+        viewCtx.strokeText(p.name, p.x, p.y - p.radius - 8 / scale);
+        viewCtx.fillText(p.name, p.x, p.y - p.radius - 8 / scale);
+      }
+
+      if (me.alive) {
+        if (GameSprites.isReady()) {
+          GameSprites.drawPlayer(viewCtx, me, me.x, me.y, me.radius, { highlight: true });
+        } else {
+          viewCtx.beginPath();
+          viewCtx.fillStyle = me.color;
+          viewCtx.arc(me.x, me.y, me.radius, 0, Math.PI * 2);
+          viewCtx.fill();
+        }
+        viewCtx.font = `900 ${13 / scale}px sans-serif`;
+        viewCtx.textAlign = 'center';
+        viewCtx.fillStyle = '#fff';
+        viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
+        viewCtx.lineWidth = 3 / scale;
+        viewCtx.strokeText('Bạn', me.x, me.y - me.radius - 10 / scale);
+        viewCtx.fillText('Bạn', me.x, me.y - me.radius - 10 / scale);
+      }
+
+      viewCtx.restore();
+
+      const grad = viewCtx.createRadialGradient(cx, cy, Math.min(w, h) * 0.28, cx, cy, Math.min(w, h) * 0.55);
+      grad.addColorStop(0, 'rgba(7,17,31,0)');
+      grad.addColorStop(1, 'rgba(7,17,31,.72)');
+      viewCtx.fillStyle = grad;
+      viewCtx.fillRect(0, 0, w, h);
+
+      requestAnimationFrame(renderViewport);
+    }
+
+    let joystickActive = false;
+    let joystickDir = { x: 0, y: 0 };
+    const keys = new Set();
+    const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+    let controlTimer = null;
+
+    function emitControl(x, y) {
+      if (!myId) return;
+      socket.emit('control', { x, y });
+    }
+
+    function keyboardVector() {
+      let x = 0, y = 0;
+      if (keys.has('ArrowLeft') || keys.has('KeyA')) x -= 1;
+      if (keys.has('ArrowRight') || keys.has('KeyD')) x += 1;
+      if (keys.has('ArrowUp') || keys.has('KeyW')) y -= 1;
+      if (keys.has('ArrowDown') || keys.has('KeyS')) y += 1;
+      return { x, y };
+    }
+
+    function pushControl() {
+      if (!myId) return;
+      if (joystickActive) {
+        emitControl(joystickDir.x, joystickDir.y);
+        return;
+      }
+      const { x, y } = keyboardVector();
+      emitControl(x, y);
+    }
+
+    function startControlLoop() {
+      if (controlTimer) return;
+      controlTimer = setInterval(pushControl, 50);
+    }
+
+    function joystickCenter() {
+      const r = joystick.getBoundingClientRect();
+      return { x: r.width / 2, y: r.height / 2 };
+    }
+
+    function setKnob(dx, dy) {
+      const max = 58;
+      const len = Math.hypot(dx, dy);
+      const k = len > max ? max / len : 1;
+      const x = dx * k;
+      const y = dy * k;
+      knob.style.transform = `translate(${x}px, ${y}px)`;
+      joystickDir.x = x / max;
+      joystickDir.y = y / max;
+      pushControl();
+    }
+
+    function resetKnob() {
+      knob.style.transform = 'translate(0px, 0px)';
+      joystickDir = { x: 0, y: 0 };
+      joystickActive = false;
+      pushControl();
+    }
+
+    function pointerPos(e) {
+      const r = joystick.getBoundingClientRect();
+      return { x: e.clientX - r.left, y: e.clientY - r.top };
+    }
+
+    function onJoystickStart(e) {
+      if (!myId) return;
+      e.preventDefault();
+      joystickActive = true;
+      joystick.setPointerCapture(e.pointerId);
+      const p = pointerPos(e);
+      const c = joystickCenter();
+      setKnob(p.x - c.x, p.y - c.y);
+    }
+
+    function onJoystickMove(e) {
+      if (!joystickActive) return;
+      e.preventDefault();
+      const p = pointerPos(e);
+      const c = joystickCenter();
+      setKnob(p.x - c.x, p.y - c.y);
+    }
+
+    function onJoystickEnd(e) {
+      if (!joystickActive) return;
+      e.preventDefault();
+      if (joystick.hasPointerCapture(e.pointerId)) joystick.releasePointerCapture(e.pointerId);
+      resetKnob();
+    }
+
+    joystick.addEventListener('pointerdown', onJoystickStart);
+    joystick.addEventListener('pointermove', onJoystickMove);
+    joystick.addEventListener('pointerup', onJoystickEnd);
+    joystick.addEventListener('pointercancel', onJoystickEnd);
+    joystick.addEventListener('lostpointercapture', () => { if (joystickActive) resetKnob(); });
+
+    window.addEventListener('keydown', e => {
+      if (!myId || !GAME_KEYS.has(e.code)) return;
+      if (e.target.closest('input, textarea, select')) return;
+      e.preventDefault();
+      keys.add(e.code);
+      pushControl();
+    });
+
+    window.addEventListener('keyup', e => {
+      if (!GAME_KEYS.has(e.code)) return;
+      keys.delete(e.code);
+      pushControl();
+    });
+
+    window.addEventListener('blur', () => {
+      keys.clear();
+      if (!joystickActive) pushControl();
+    });
+
+    document.querySelectorAll('[data-vote]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentVote = btn.dataset.vote;
+        socket.emit('vote', { option: currentVote });
+        document.querySelectorAll('[data-vote]').forEach(b => b.classList.toggle('selected', b.dataset.vote === currentVote));
+      });
+    });
+  </script>
+</body>
+</html>

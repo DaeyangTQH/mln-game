@@ -1,0 +1,15 @@
+{
+  "name": "monopoly-market-arena",
+  "version": "1.0.0",
+  "description": "A classroom web game that simulates competition, concentration, monopoly, electricity/water infrastructure power, and state regulation.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "assets:process": "python scripts/process-assets.py"
+  },
+  "dependencies": {
+    "express": "^4.18.3",
+    "socket.io": "^4.7.5"
+  }
+}
