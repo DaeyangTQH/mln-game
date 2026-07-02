@@ -35,6 +35,10 @@ const SWALLOW_MASS_TRANSFER = 0.24;
 const RESOURCE_HITBOX_SCALE = 1.18;
 const MONOPOLY_SHARE_WARNING = 0.45;
 const MONOPOLY_SHARE_DANGER = 0.65;
+// Tài nguyên gần như tĩnh → chỉ gửi lại mỗi vài tick để tiết kiệm băng thông
+const RESOURCE_SYNC_EVERY = 3;
+
+const round1 = (n) => Math.round(n * 10) / 10;
 
 const resourceTypes = [
   { type: 'capital', label: 'Vốn', value: 2.2, color: '#f6c85f', weight: 0.38 },
@@ -51,6 +55,14 @@ const palette = [
 ];
 
 let game = createGame();
+
+// Địa chỉ LAN gần như không đổi → cache thay vì quét mỗi tick (30 lần/giây)
+let cachedLan = getLANAddresses();
+let cachedPreferredLan = getPreferredLanIp();
+setInterval(() => {
+  cachedLan = getLANAddresses();
+  cachedPreferredLan = getPreferredLanIp();
+}, 15000);
 
 function createGame(opts = {}) {
   return {
@@ -106,7 +118,7 @@ function getPreferredLanIp() {
 
 function getJoinUrl(game) {
   if (game.customJoinUrl) return game.customJoinUrl;
-  const ip = getPreferredLanIp();
+  const ip = cachedPreferredLan;
   const base = ip ? `http://${ip}:${PORT}` : `http://localhost:${PORT}`;
   return `${base}/player`;
 }
@@ -400,14 +412,14 @@ function updateMetrics() {
   };
 }
 
-function publicState() {
+function publicState(includeResources = true) {
   const players = Object.values(game.players).map(p => ({
     id: p.id,
     name: p.name,
-    x: p.x,
-    y: p.y,
-    radius: p.radius,
-    mass: p.mass,
+    x: Math.round(p.x),
+    y: Math.round(p.y),
+    radius: round1(p.radius),
+    mass: Math.round(p.mass),
     score: Math.round(p.score),
     swallowed: p.swallowed,
     swallowedBy: p.swallowedBy,
@@ -443,7 +455,7 @@ function publicState() {
     ? Math.max(0, game.sessionDurationMs - elapsedMs)
     : game.sessionDurationMs;
 
-  return {
+  const payload = {
     world: WORLD,
     phase: game.phase,
     phaseName: game.phaseName,
@@ -454,7 +466,6 @@ function publicState() {
     sessionDurationMs: game.sessionDurationMs,
     joinUrl: getJoinUrl(game),
     players,
-    resources: game.resources,
     infrastructures: game.infrastructures.map(i => ({ ...i, ownerName: i.ownerId && game.players[i.ownerId] ? game.players[i.ownerId].name : null })),
     leaderboard,
     events: game.events,
@@ -465,19 +476,34 @@ function publicState() {
     },
     voteCounts,
     playerCount: Object.keys(game.players).length,
-    lan: getLANAddresses(),
-    preferredLan: getPreferredLanIp(),
+    lan: cachedLan,
+    preferredLan: cachedPreferredLan,
     port: PORT,
   };
+
+  if (includeResources) {
+    payload.resources = game.resources.map(r => ({
+      id: r.id,
+      type: r.type,
+      color: r.color,
+      radius: round1(r.radius),
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+    }));
+  }
+
+  return payload;
 }
 
+let tickCount = 0;
 setInterval(() => {
   if (game.running && game.gameStarted) {
     for (const p of Object.values(game.players)) updatePlayer(p);
     handleSwallowing();
     updateMetrics();
   }
-  io.emit('state', publicState());
+  tickCount++;
+  io.emit('state', publicState(tickCount % RESOURCE_SYNC_EVERY === 0));
 }, 1000 / TICK_RATE);
 
 server.listen(PORT, '0.0.0.0', () => {

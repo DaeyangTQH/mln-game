@@ -66,6 +66,10 @@
     const socket = io();
     let myId = null;
     let state = null;
+    let resourceCache = [];
+    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
+    let selfRender = null;
+    let lastFrameTs = 0;
     let currentVote = null;
     let selectedLogo = 0;
     const joinCard = document.getElementById('joinCard');
@@ -107,6 +111,8 @@
 
     socket.on('state', s => {
       state = s;
+      if (s.resources) resourceCache = s.resources;
+      if (s.players) playerBuffer.push(s.players);
       if (!myId) return;
       const me = state.players.find(p => p.id === myId);
       document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
@@ -213,16 +219,34 @@
         return;
       }
 
-      const me = state.players.find(p => p.id === myId);
-      if (!me) {
+      const interpPlayers = playerBuffer.sample();
+      const serverMe = state.players.find(p => p.id === myId);
+      if (!serverMe) {
         requestAnimationFrame(renderViewport);
         return;
       }
 
+      // CHÍNH mình: smoothing độ trễ thấp (bám sát server) → phản hồi nhạy như bản main nhưng không giật
+      const nowTs = performance.now();
+      const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
+      lastFrameTs = nowTs;
+      if (!selfRender) selfRender = { x: serverMe.x, y: serverMe.y };
+      const dxs = serverMe.x - selfRender.x;
+      const dys = serverMe.y - selfRender.y;
+      if (dxs * dxs + dys * dys > 300 * 300) {
+        selfRender.x = serverMe.x;
+        selfRender.y = serverMe.y;
+      } else {
+        const k = 1 - Math.pow(1 - 0.4, dt * 60);
+        selfRender.x += dxs * k;
+        selfRender.y += dys * k;
+      }
+      const me = { ...serverMe, x: selfRender.x, y: selfRender.y };
+
       const camera = cameraFor(me, w, h);
       drawInfiniteMap(camera, w, h);
 
-      for (const r of state.resources) {
+      for (const r of resourceCache) {
         if (!isNearSight(r, me, camera, r.radius)) continue;
         const p = worldToScreen(r.x, r.y, camera);
         const rr = Math.max(7, r.radius * camera.scale);
@@ -251,7 +275,7 @@
         }
       }
 
-      const others = state.players.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
+      const others = interpPlayers.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
       for (const p of others) {
         if (!isNearSight(p, me, camera, p.radius)) continue;
         const sp = worldToScreen(p.x, p.y, camera);
@@ -304,8 +328,13 @@
     const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
     let controlTimer = null;
 
+    let lastControl = { x: 999, y: 999 };
     function emitControl(x, y) {
       if (!myId) return;
+      // Server giữ hướng cho tới khi đổi → chỉ gửi khi thực sự thay đổi để tránh spam socket
+      if (Math.abs(x - lastControl.x) < 0.02 && Math.abs(y - lastControl.y) < 0.02) return;
+      lastControl.x = x;
+      lastControl.y = y;
       socket.emit('control', { x, y });
     }
 
@@ -347,7 +376,7 @@
       knob.style.transform = `translate(${x}px, ${y}px)`;
       joystickDir.x = x / max;
       joystickDir.y = y / max;
-      pushControl();
+      // Không emit ở đây; vòng lặp 50ms (pushControl) sẽ gửi có kiểm soát tần suất
     }
 
     function resetKnob() {
