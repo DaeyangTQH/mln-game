@@ -33,6 +33,8 @@ const RESOURCE_MASS_GAIN = 2.6;
 const INFRA_PASSIVE_GAIN = 0.006;
 const SWALLOW_MASS_TRANSFER = 0.24;
 const RESOURCE_HITBOX_SCALE = 1.18;
+const MOVEMENT_ACCELERATION = 0.32;
+const MOVEMENT_FRICTION = 0.72;
 const MONOPOLY_SHARE_WARNING = 0.45;
 const MONOPOLY_SHARE_DANGER = 0.65;
 
@@ -297,8 +299,13 @@ function updatePlayer(p) {
   }
 
   const speed = Math.max(2.1, MAX_SPEED - p.radius / 28);
-  p.vx = p.dirX * speed;
-  p.vy = p.dirY * speed;
+  const targetVx = p.dirX * speed;
+  const targetVy = p.dirY * speed;
+  const smoothing = p.dirX || p.dirY ? MOVEMENT_ACCELERATION : 1 - MOVEMENT_FRICTION;
+  p.vx += (targetVx - p.vx) * smoothing;
+  p.vy += (targetVy - p.vy) * smoothing;
+  if (!p.dirX && Math.abs(p.vx) < 0.03) p.vx = 0;
+  if (!p.dirY && Math.abs(p.vy) < 0.03) p.vy = 0;
   p.x = Math.max(p.radius, Math.min(WORLD.width - p.radius, p.x + p.vx));
   p.y = Math.max(p.radius, Math.min(WORLD.height - p.radius, p.y + p.vy));
 

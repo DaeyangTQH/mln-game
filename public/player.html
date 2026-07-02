@@ -68,6 +68,8 @@
     let state = null;
     let currentVote = null;
     let selectedLogo = 0;
+    let lastFrameAt = performance.now();
+    const smoothPlayers = new Map();
     const joinCard = document.getElementById('joinCard');
     const hud = document.getElementById('hud');
     const joystick = document.getElementById('joystick');
@@ -151,6 +153,36 @@
       };
     }
 
+    function smoothedPlayers(players, dt) {
+      const alpha = 1 - Math.exp(-dt * 18);
+      const liveIds = new Set(players.map(p => p.id));
+      for (const [id] of smoothPlayers) {
+        if (!liveIds.has(id)) smoothPlayers.delete(id);
+      }
+      return players.map(p => {
+        let s = smoothPlayers.get(p.id);
+        if (!s || s.alive !== p.alive) {
+          s = { ...p };
+          smoothPlayers.set(p.id, s);
+          return s;
+        }
+        s.x += (p.x - s.x) * alpha;
+        s.y += (p.y - s.y) * alpha;
+        s.radius += (p.radius - s.radius) * alpha;
+        s.mass += (p.mass - s.mass) * alpha;
+        Object.assign(s, {
+          name: p.name,
+          score: p.score,
+          swallowed: p.swallowed,
+          swallowedBy: p.swallowedBy,
+          color: p.color,
+          logoIndex: p.logoIndex,
+          alive: p.alive,
+        });
+        return s;
+      });
+    }
+
     function isNearSight(item, me, camera, margin = 0) {
       return Math.hypot(item.x - me.x, item.y - me.y) <= camera.sightRadius + margin;
     }
@@ -203,6 +235,9 @@
     }
 
     function renderViewport() {
+      const now = performance.now();
+      const dt = Math.min(0.08, (now - lastFrameAt) / 1000);
+      lastFrameAt = now;
       const box = viewCanvas.parentElement.getBoundingClientRect();
       const w = box.width;
       const h = box.height;
@@ -213,7 +248,8 @@
         return;
       }
 
-      const me = state.players.find(p => p.id === myId);
+      const renderPlayers = smoothedPlayers(state.players, dt);
+      const me = renderPlayers.find(p => p.id === myId);
       if (!me) {
         requestAnimationFrame(renderViewport);
         return;
@@ -251,7 +287,7 @@
         }
       }
 
-      const others = state.players.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
+      const others = renderPlayers.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
       for (const p of others) {
         if (!isNearSight(p, me, camera, p.radius)) continue;
         const sp = worldToScreen(p.x, p.y, camera);
@@ -330,7 +366,7 @@
 
     function startControlLoop() {
       if (controlTimer) return;
-      controlTimer = setInterval(pushControl, 50);
+      controlTimer = setInterval(pushControl, 33);
     }
 
     function joystickCenter() {

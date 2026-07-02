@@ -144,6 +144,8 @@
     let state = null;
     let camera = { x: 0, y: 0, scale: 0.58 };
     let lastJoinUrl = '';
+    let lastFrameAt = performance.now();
+    const smoothPlayers = new Map();
     const mapImage = new Image();
     let mapReady = false;
     mapImage.onload = () => { mapReady = true; };
@@ -257,6 +259,36 @@
 
     function worldToScreen(x, y) {
       return { x: camera.x + x * camera.scale, y: camera.y + y * camera.scale };
+    }
+
+    function smoothedPlayers(players, dt) {
+      const alpha = 1 - Math.exp(-dt * 18);
+      const liveIds = new Set(players.map(p => p.id));
+      for (const [id] of smoothPlayers) {
+        if (!liveIds.has(id)) smoothPlayers.delete(id);
+      }
+      return players.map(p => {
+        let s = smoothPlayers.get(p.id);
+        if (!s || s.alive !== p.alive) {
+          s = { ...p };
+          smoothPlayers.set(p.id, s);
+          return s;
+        }
+        s.x += (p.x - s.x) * alpha;
+        s.y += (p.y - s.y) * alpha;
+        s.radius += (p.radius - s.radius) * alpha;
+        s.mass += (p.mass - s.mass) * alpha;
+        Object.assign(s, {
+          name: p.name,
+          score: p.score,
+          swallowed: p.swallowed,
+          swallowedBy: p.swallowedBy,
+          color: p.color,
+          logoIndex: p.logoIndex,
+          alive: p.alive,
+        });
+        return s;
+      });
     }
 
     function drawMap() {
@@ -376,6 +408,9 @@
     }
 
     function render() {
+      const now = performance.now();
+      const dt = Math.min(0.08, (now - lastFrameAt) / 1000);
+      lastFrameAt = now;
       const { w, h } = stageSize();
       ctx.clearRect(0, 0, w, h);
       drawMap();
@@ -383,7 +418,7 @@
       if (state) {
         state.resources.forEach(drawResource);
         state.infrastructures.forEach(drawInfrastructure);
-        state.players.slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
+        smoothedPlayers(state.players, dt).slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
       }
       requestAnimationFrame(render);
     }
