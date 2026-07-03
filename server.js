@@ -22,13 +22,23 @@ app.get('/player', (_req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const WORLD = { width: 2048, height: 1152 };
+const WORLD = { width: 4096, height: 2304 };
 const TICK_RATE = 30;
 const MAX_SPEED = 6.2;
-const RESOURCE_COUNT = 260;
+const RESOURCE_COUNT = 680;
 const PLAYER_START_RADIUS = 18;
+const PLAYER_START_MASS = 90;
+const RADIUS_GROWTH_SCALE = 1.12;
+const RESOURCE_MASS_GAIN = 2.6;
+const INFRA_PASSIVE_GAIN = 0.006;
+const SWALLOW_MASS_TRANSFER = 0.24;
+const RESOURCE_HITBOX_SCALE = 1.18;
 const MONOPOLY_SHARE_WARNING = 0.45;
 const MONOPOLY_SHARE_DANGER = 0.65;
+// Tài nguyên gần như tĩnh → chỉ gửi lại mỗi vài tick để tiết kiệm băng thông
+const RESOURCE_SYNC_EVERY = 3;
+
+const round1 = (n) => Math.round(n * 10) / 10;
 
 const resourceTypes = [
   { type: 'capital', label: 'Vốn', value: 2.2, color: '#f6c85f', weight: 0.38 },
@@ -46,6 +56,14 @@ const palette = [
 
 let game = createGame();
 
+// Địa chỉ LAN gần như không đổi → cache thay vì quét mỗi tick (30 lần/giây)
+let cachedLan = getLANAddresses();
+let cachedPreferredLan = getPreferredLanIp();
+setInterval(() => {
+  cachedLan = getLANAddresses();
+  cachedPreferredLan = getPreferredLanIp();
+}, 15000);
+
 function createGame(opts = {}) {
   return {
     phase: 1,
@@ -58,8 +76,8 @@ function createGame(opts = {}) {
     players: {},
     resources: [],
     infrastructures: [
-      { id: 'grid', type: 'electricity', label: 'Lưới điện', x: 720, y: 580, radius: 78, ownerId: null, capturedAt: null, color: '#facc15' },
-      { id: 'pipe', type: 'water', label: 'Đường ống nước', x: 1440, y: 580, radius: 78, ownerId: null, capturedAt: null, color: '#38bdf8' },
+      { id: 'grid', type: 'electricity', label: 'Lưới điện', x: WORLD.width * 0.34, y: WORLD.height * 0.5, radius: 110, ownerId: null, capturedAt: null, color: '#facc15' },
+      { id: 'pipe', type: 'water', label: 'Đường ống nước', x: WORLD.width * 0.66, y: WORLD.height * 0.5, radius: 110, ownerId: null, capturedAt: null, color: '#38bdf8' },
     ],
     events: [],
     votes: {},
@@ -100,7 +118,7 @@ function getPreferredLanIp() {
 
 function getJoinUrl(game) {
   if (game.customJoinUrl) return game.customJoinUrl;
-  const ip = getPreferredLanIp();
+  const ip = cachedPreferredLan;
   const base = ip ? `http://${ip}:${PORT}` : `http://localhost:${PORT}`;
   return `${base}/player`;
 }
@@ -133,6 +151,15 @@ function newResource(id = `${Date.now()}-${Math.random()}`) {
   };
 }
 
+function radiusFromMass(mass) {
+  const growth = Math.max(0, Math.sqrt(mass) - Math.sqrt(PLAYER_START_MASS));
+  return PLAYER_START_RADIUS + growth * RADIUS_GROWTH_SCALE;
+}
+
+function resourceHitRadius(resource) {
+  return resource.radius * RESOURCE_HITBOX_SCALE;
+}
+
 function safeName(name) {
   const text = String(name || '').replace(/<[^>]*>?/gm, '').trim();
   return text.slice(0, 24) || 'Doanh nghiệp mới';
@@ -160,7 +187,7 @@ function createPlayer(socketId, name, logoIndex = 0) {
     dirX: 0,
     dirY: 0,
     radius: PLAYER_START_RADIUS,
-    mass: 90,
+    mass: PLAYER_START_MASS,
     score: 0,
     swallowed: 0,
     swallowedBy: 0,
@@ -273,7 +300,7 @@ function updatePlayer(p) {
       p.x = spawn.x;
       p.y = spawn.y;
       p.radius = PLAYER_START_RADIUS;
-      p.mass = 90;
+      p.mass = PLAYER_START_MASS;
       p.alive = true;
       p.dirX = 0;
       p.dirY = 0;
@@ -290,10 +317,10 @@ function updatePlayer(p) {
   for (let i = game.resources.length - 1; i >= 0; i--) {
     const r = game.resources[i];
     const d = Math.hypot(p.x - r.x, p.y - r.y);
-    if (d < p.radius + r.radius) {
-      p.mass += r.value * 6;
+    if (d < p.radius + resourceHitRadius(r)) {
+      p.mass += r.value * RESOURCE_MASS_GAIN;
       p.score += r.value;
-      p.radius = Math.sqrt(p.mass) * 1.9;
+      p.radius = radiusFromMass(p.mass);
       game.resources.splice(i, 1);
       game.resources.push(newResource());
     }
@@ -311,8 +338,8 @@ function updatePlayer(p) {
       }
       if (infra.ownerId === p.id && p.alive) {
         p.score += 0.02;
-        p.mass += 0.02;
-        p.radius = Math.sqrt(p.mass) * 1.9;
+        p.mass += INFRA_PASSIVE_GAIN;
+        p.radius = radiusFromMass(p.mass);
       }
     }
   }
@@ -331,8 +358,8 @@ function handleSwallowing() {
         if (a.radius > b.radius * 1.18) { big = a; small = b; }
         if (b.radius > a.radius * 1.18) { big = b; small = a; }
         if (big && small) {
-          big.mass += small.mass * 0.42;
-          big.radius = Math.sqrt(big.mass) * 1.9;
+          big.mass += small.mass * SWALLOW_MASS_TRANSFER;
+          big.radius = radiusFromMass(big.mass);
           big.score += 18;
           big.swallowed += 1;
           small.swallowedBy += 1;
@@ -385,14 +412,14 @@ function updateMetrics() {
   };
 }
 
-function publicState() {
+function publicState(includeResources = true) {
   const players = Object.values(game.players).map(p => ({
     id: p.id,
     name: p.name,
-    x: p.x,
-    y: p.y,
-    radius: p.radius,
-    mass: p.mass,
+    x: Math.round(p.x),
+    y: Math.round(p.y),
+    radius: round1(p.radius),
+    mass: Math.round(p.mass),
     score: Math.round(p.score),
     swallowed: p.swallowed,
     swallowedBy: p.swallowedBy,
@@ -428,7 +455,7 @@ function publicState() {
     ? Math.max(0, game.sessionDurationMs - elapsedMs)
     : game.sessionDurationMs;
 
-  return {
+  const payload = {
     world: WORLD,
     phase: game.phase,
     phaseName: game.phaseName,
@@ -439,7 +466,6 @@ function publicState() {
     sessionDurationMs: game.sessionDurationMs,
     joinUrl: getJoinUrl(game),
     players,
-    resources: game.resources,
     infrastructures: game.infrastructures.map(i => ({ ...i, ownerName: i.ownerId && game.players[i.ownerId] ? game.players[i.ownerId].name : null })),
     leaderboard,
     events: game.events,
@@ -450,19 +476,34 @@ function publicState() {
     },
     voteCounts,
     playerCount: Object.keys(game.players).length,
-    lan: getLANAddresses(),
-    preferredLan: getPreferredLanIp(),
+    lan: cachedLan,
+    preferredLan: cachedPreferredLan,
     port: PORT,
   };
+
+  if (includeResources) {
+    payload.resources = game.resources.map(r => ({
+      id: r.id,
+      type: r.type,
+      color: r.color,
+      radius: round1(r.radius),
+      x: Math.round(r.x),
+      y: Math.round(r.y),
+    }));
+  }
+
+  return payload;
 }
 
+let tickCount = 0;
 setInterval(() => {
   if (game.running && game.gameStarted) {
     for (const p of Object.values(game.players)) updatePlayer(p);
     handleSwallowing();
     updateMetrics();
   }
-  io.emit('state', publicState());
+  tickCount++;
+  io.emit('state', publicState(tickCount % RESOURCE_SYNC_EVERY === 0));
 }, 1000 / TICK_RATE);
 
 server.listen(PORT, '0.0.0.0', () => {

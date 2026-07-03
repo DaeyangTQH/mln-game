@@ -38,6 +38,13 @@ window.GameSprites = (() => {
     license: 6,
   };
 
+  const RESOURCE_STYLE = {
+    capital: { fill: 'rgba(250, 204, 21, .34)', ring: '#fde047', glow: 'rgba(250, 204, 21, .62)' },
+    tech: { fill: 'rgba(45, 212, 191, .32)', ring: '#2dd4bf', glow: 'rgba(45, 212, 191, .58)' },
+    customer: { fill: 'rgba(244, 114, 182, .30)', ring: '#f472b6', glow: 'rgba(244, 114, 182, .56)' },
+    license: { fill: 'rgba(251, 146, 60, .34)', ring: '#fb923c', glow: 'rgba(251, 146, 60, .62)' },
+  };
+
   const INFRA_SPRITE = {
     electricity: 8,
     water: 9,
@@ -172,19 +179,44 @@ window.GameSprites = (() => {
   function drawResource(ctx, resource, x, y, radius) {
     const sprite = RESOURCE_SPRITE[resource.type] ?? 0;
     const size = Math.max(radius * RESOURCE_DIAMETER_SCALE, 12);
+    const style = RESOURCE_STYLE[resource.type] || RESOURCE_STYLE.capital;
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.35)';
-    ctx.shadowBlur = 3;
+    ctx.beginPath();
+    ctx.fillStyle = style.fill;
+    ctx.strokeStyle = style.ring;
+    ctx.lineWidth = Math.max(1.5, radius * 0.18);
+    ctx.shadowColor = style.glow;
+    ctx.shadowBlur = Math.max(5, radius * 0.7);
+    ctx.arc(x, y, radius * 1.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.shadowColor = 'rgba(0,0,0,.5)';
+    ctx.shadowBlur = 4;
     drawSprite(ctx, 'icons', sprite, x, y, size);
     ctx.restore();
   }
 
-  function drawResourceScreen(ctx, resource, sx, sy, screenRadius) {
+  function drawResourceScreen(ctx, resource, sx, sy, screenRadius, opts = {}) {
     const sprite = RESOURCE_SPRITE[resource.type] ?? 0;
     const size = Math.max(screenRadius * RESOURCE_DIAMETER_SCALE, 8);
+    const style = RESOURCE_STYLE[resource.type] || RESOURCE_STYLE.capital;
+    const lite = opts.lite; // bỏ shadowBlur khi vẽ số lượng lớn (màn host) để giữ FPS
     ctx.save();
-    ctx.shadowColor = 'rgba(0,0,0,.35)';
-    ctx.shadowBlur = 3;
+    ctx.beginPath();
+    ctx.fillStyle = style.fill;
+    ctx.strokeStyle = style.ring;
+    ctx.lineWidth = Math.max(1.5, screenRadius * 0.18);
+    if (!lite) {
+      ctx.shadowColor = style.glow;
+      ctx.shadowBlur = Math.max(5, screenRadius * 0.7);
+    }
+    ctx.arc(sx, sy, screenRadius * 1.18, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    if (!lite) {
+      ctx.shadowColor = 'rgba(0,0,0,.5)';
+      ctx.shadowBlur = 4;
+    }
     drawSprite(ctx, 'icons', sprite, sx, sy, size);
     ctx.restore();
   }
@@ -209,6 +241,63 @@ window.GameSprites = (() => {
       ctx.fillText(`Kiểm soát: ${infra.ownerName}`, x, y + radius + 38);
     }
     ctx.restore();
+  }
+
+  // Bộ đệm snapshot để nội suy vị trí (chống giật khi server chỉ gửi 30Hz)
+  function createSnapshotBuffer(options = {}) {
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const delay = options.delay ?? 80;
+    const max = options.max ?? 16;
+    const snapThreshold = options.snap ?? 300;
+    const snapSq = snapThreshold * snapThreshold;
+    const buffer = [];
+
+    function push(players) {
+      buffer.push({ t: now(), players: players || [] });
+      if (buffer.length > max) buffer.shift();
+    }
+
+    function sample(nowTs) {
+      const t = (nowTs ?? now()) - delay;
+      if (buffer.length === 0) return [];
+      if (buffer.length === 1) return buffer[0].players;
+
+      let older = buffer[0];
+      let newer = buffer[buffer.length - 1];
+      if (t >= newer.t) {
+        older = buffer[buffer.length - 2];
+      } else {
+        for (let i = 0; i < buffer.length - 1; i++) {
+          if (buffer[i].t <= t && buffer[i + 1].t >= t) { older = buffer[i]; newer = buffer[i + 1]; break; }
+        }
+      }
+
+      const span = newer.t - older.t || 1;
+      let alpha = (t - older.t) / span;
+      alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+
+      const olderById = new Map();
+      for (const p of older.players) olderById.set(p.id, p);
+
+      return newer.players.map((np) => {
+        const op = olderById.get(np.id);
+        if (!op) return np;
+        const dx = np.x - op.x;
+        const dy = np.y - op.y;
+        // Nhảy quá xa (respawn/teleport) → không nội suy để tránh trượt ngang màn
+        if (dx * dx + dy * dy > snapSq) return np;
+        return {
+          ...np,
+          x: op.x + dx * alpha,
+          y: op.y + dy * alpha,
+          radius: op.radius + (np.radius - op.radius) * alpha,
+        };
+      });
+    }
+
+    function reset() { buffer.length = 0; }
+
+    return { push, sample, reset };
   }
 
   function buildLogoPicker(container, onSelect, initial = 0) {
@@ -237,6 +326,7 @@ window.GameSprites = (() => {
     EXPLAIN_SPRITES,
     MAP_DECORATIONS,
     RESOURCE_SPRITE,
+    RESOURCE_STYLE,
     LOGO_DIAMETER_SCALE,
     RESOURCE_DIAMETER_SCALE,
     PLAYER_SCREEN_RADIUS_RATIO,
@@ -250,6 +340,7 @@ window.GameSprites = (() => {
     drawResourceScreen,
     drawInfrastructure,
     buildLogoPicker,
+    createSnapshotBuffer,
     playerViewHalf,
     frame,
   };

@@ -139,9 +139,11 @@
     const hostStage = document.getElementById('hostStage');
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-    const PROJECTOR_SCALE = 1.38;
+    const PROJECTOR_SCALE = 1;
 
     let state = null;
+    let resourceCache = [];
+    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
     let camera = { x: 0, y: 0, scale: 0.58 };
     let lastJoinUrl = '';
     const mapImage = new Image();
@@ -290,9 +292,9 @@
     function drawGlow(sx, sy, r, color) {
       ctx.save();
       ctx.beginPath();
-      ctx.arc(sx, sy, r + 5, 0, Math.PI * 2);
+      ctx.arc(sx, sy, r + 7, 0, Math.PI * 2);
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = 0.48;
       ctx.fill();
       ctx.globalAlpha = 1;
       ctx.beginPath();
@@ -304,16 +306,21 @@
     }
 
     function resourceGlowColor(type) {
-      const map = { capital: '#D9A441', tech: '#6B9AC4', customer: '#90B8A0', license: '#D98C7A' };
-      return map[type] || '#fff';
+      const map = {
+        capital: 'rgba(250,204,21,.62)',
+        tech: 'rgba(45,212,191,.58)',
+        customer: 'rgba(244,114,182,.58)',
+        license: 'rgba(251,146,60,.62)',
+      };
+      return map[type] || 'rgba(255,255,255,.55)';
     }
 
     function drawResource(r) {
       const p = worldToScreen(r.x, r.y);
-      const screenR = Math.max(5, r.radius * camera.scale * PROJECTOR_SCALE);
+      const screenR = Math.max(4, r.radius * camera.scale);
       drawGlow(p.x, p.y, screenR, resourceGlowColor(r.type));
       if (GameSprites.isReady()) {
-        GameSprites.drawResourceScreen(ctx, r, p.x, p.y, screenR);
+        GameSprites.drawResourceScreen(ctx, r, p.x, p.y, screenR, { lite: true });
         return;
       }
       ctx.save();
@@ -344,7 +351,7 @@
 
     function drawPlayer(p) {
       const pos = worldToScreen(p.x, p.y);
-      const screenR = Math.max(10, p.radius * camera.scale * PROJECTOR_SCALE);
+      const screenR = Math.max(6, p.radius * camera.scale * PROJECTOR_SCALE);
       drawGlow(pos.x, pos.y, screenR, p.color || '#7BA392');
       ctx.save();
       if (GameSprites.isReady()) {
@@ -376,9 +383,9 @@
       drawMap();
       drawDecorations();
       if (state) {
-        state.resources.forEach(drawResource);
+        resourceCache.forEach(drawResource);
         state.infrastructures.forEach(drawInfrastructure);
-        state.players.slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
+        playerBuffer.sample().slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
       }
       requestAnimationFrame(render);
     }
@@ -474,10 +481,18 @@
       });
     }
 
+    let lastUiUpdate = 0;
     socket.on('state', s => {
       state = s;
+      if (s.resources) resourceCache = s.resources;
+      if (s.players) playerBuffer.push(s.players);
       fitWorld();
-      updateUI();
+      // DOM của sidebar/leaderboard/sự kiện nặng → cập nhật ~8Hz thay vì 30Hz
+      const now = performance.now();
+      if (now - lastUiUpdate > 120) {
+        lastUiUpdate = now;
+        updateUI();
+      }
     });
 
     function startGame() {

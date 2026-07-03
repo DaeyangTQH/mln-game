@@ -66,6 +66,10 @@
     const socket = io();
     let myId = null;
     let state = null;
+    let resourceCache = [];
+    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
+    let selfRender = null;
+    let lastFrameTs = 0;
     let currentVote = null;
     let selectedLogo = 0;
     const joinCard = document.getElementById('joinCard');
@@ -95,6 +99,7 @@
 
     socket.on('joined', ({ id, player }) => {
       myId = id;
+      document.body.classList.add('player-playing');
       joinCard.classList.add('hide');
       hud.classList.remove('hide');
       document.getElementById('playerName').textContent = player.name;
@@ -106,6 +111,8 @@
 
     socket.on('state', s => {
       state = s;
+      if (s.resources) resourceCache = s.resources;
+      if (s.players) playerBuffer.push(s.players);
       if (!myId) return;
       const me = state.players.find(p => p.id === myId);
       document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
@@ -130,12 +137,75 @@
     window.addEventListener('resize', resizeViewport);
     new ResizeObserver(resizeViewport).observe(viewCanvas.parentElement);
 
-    function viewHalfFor(me, w, h) {
-      return GameSprites.playerViewHalf(me ? me.radius : 18, Math.min(w, h));
+    function cameraFor(me, w, h) {
+      const baseHalf = GameSprites.playerViewHalf(me ? me.radius : 18, Math.min(w, h));
+      const viewHalf = Math.max(280, Math.min(460, baseHalf * 1.2));
+      const scale = Math.min(w, h) / (viewHalf * 2);
+      return {
+        scale,
+        viewHalf,
+        sightRadius: viewHalf * 0.72,
+        x: w / 2 - me.x * scale,
+        y: h / 2 - me.y * scale,
+      };
     }
 
-    function inView(x, y, cx, cy, margin = 60, half = 300) {
-      return Math.abs(x - cx) <= half + margin && Math.abs(y - cy) <= half + margin;
+    function worldToScreen(x, y, camera) {
+      return {
+        x: camera.x + x * camera.scale,
+        y: camera.y + y * camera.scale,
+      };
+    }
+
+    function isNearSight(item, me, camera, margin = 0) {
+      return Math.hypot(item.x - me.x, item.y - me.y) <= camera.sightRadius + margin;
+    }
+
+    function drawInfiniteMap(camera, w, h) {
+      const world = state.world;
+      viewCtx.fillStyle = '#23413b';
+      viewCtx.fillRect(0, 0, w, h);
+
+      viewCtx.save();
+      viewCtx.translate(camera.x, camera.y);
+      viewCtx.scale(camera.scale, camera.scale);
+
+      const left = -camera.x / camera.scale;
+      const top = -camera.y / camera.scale;
+      const right = (w - camera.x) / camera.scale;
+      const bottom = (h - camera.y) / camera.scale;
+      const startX = Math.floor(left / world.width) * world.width;
+      const startY = Math.floor(top / world.height) * world.height;
+
+      if (mapReady) {
+        for (let x = startX; x < right; x += world.width) {
+          for (let y = startY; y < bottom; y += world.height) {
+            viewCtx.globalAlpha = x === 0 && y === 0 ? 1 : 0.42;
+            viewCtx.drawImage(mapImage, x, y, world.width, world.height);
+          }
+        }
+        viewCtx.globalAlpha = 1;
+      }
+
+      viewCtx.strokeStyle = 'rgba(250, 204, 21, .9)';
+      viewCtx.lineWidth = 5 / camera.scale;
+      viewCtx.setLineDash([18 / camera.scale, 12 / camera.scale]);
+      viewCtx.strokeRect(0, 0, world.width, world.height);
+      viewCtx.setLineDash([]);
+      viewCtx.restore();
+    }
+
+    function drawSightMask(w, h, camera) {
+      const cx = w / 2;
+      const cy = h / 2;
+      const inner = camera.sightRadius * camera.scale * 0.62;
+      const outer = camera.sightRadius * camera.scale;
+      const mask = viewCtx.createRadialGradient(cx, cy, inner, cx, cy, outer);
+      mask.addColorStop(0, 'rgba(2, 6, 23, 0)');
+      mask.addColorStop(0.68, 'rgba(2, 6, 23, .28)');
+      mask.addColorStop(1, 'rgba(2, 6, 23, .9)');
+      viewCtx.fillStyle = mask;
+      viewCtx.fillRect(0, 0, w, h);
     }
 
     function renderViewport() {
@@ -149,100 +219,106 @@
         return;
       }
 
-      const me = state.players.find(p => p.id === myId);
-      if (!me) {
+      const interpPlayers = playerBuffer.sample();
+      const serverMe = state.players.find(p => p.id === myId);
+      if (!serverMe) {
         requestAnimationFrame(renderViewport);
         return;
       }
 
-      const viewHalf = viewHalfFor(me, w, h);
-      const scale = Math.min(w, h) / (viewHalf * 2);
-      const cx = w / 2;
-      const cy = h / 2;
-
-      viewCtx.save();
-      viewCtx.translate(cx, cy);
-      viewCtx.scale(scale, scale);
-      viewCtx.translate(-me.x, -me.y);
-
-      if (mapReady) {
-        viewCtx.drawImage(mapImage, 0, 0, state.world.width, state.world.height);
+      // CHÍNH mình: smoothing độ trễ thấp (bám sát server) → phản hồi nhạy như bản main nhưng không giật
+      const nowTs = performance.now();
+      const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
+      lastFrameTs = nowTs;
+      if (!selfRender) selfRender = { x: serverMe.x, y: serverMe.y };
+      const dxs = serverMe.x - selfRender.x;
+      const dys = serverMe.y - selfRender.y;
+      if (dxs * dxs + dys * dys > 300 * 300) {
+        selfRender.x = serverMe.x;
+        selfRender.y = serverMe.y;
       } else {
-        viewCtx.fillStyle = '#081321';
-        viewCtx.fillRect(0, 0, state.world.width, state.world.height);
+        const k = 1 - Math.pow(1 - 0.4, dt * 60);
+        selfRender.x += dxs * k;
+        selfRender.y += dys * k;
       }
+      const me = { ...serverMe, x: selfRender.x, y: selfRender.y };
 
-      for (const r of state.resources) {
-        if (!inView(r.x, r.y, me.x, me.y, 60, viewHalf)) continue;
+      const camera = cameraFor(me, w, h);
+      drawInfiniteMap(camera, w, h);
+
+      for (const r of resourceCache) {
+        if (!isNearSight(r, me, camera, r.radius)) continue;
+        const p = worldToScreen(r.x, r.y, camera);
+        const rr = Math.max(7, r.radius * camera.scale);
         if (GameSprites.isReady()) {
-          GameSprites.drawResource(viewCtx, r, r.x, r.y, r.radius);
+          GameSprites.drawResourceScreen(viewCtx, r, p.x, p.y, rr);
         } else {
           viewCtx.beginPath();
           viewCtx.fillStyle = r.color;
-          viewCtx.arc(r.x, r.y, r.radius, 0, Math.PI * 2);
+          viewCtx.arc(p.x, p.y, rr, 0, Math.PI * 2);
           viewCtx.fill();
         }
       }
 
       if (state.phase >= 2) {
         for (const infra of state.infrastructures) {
-          if (!inView(infra.x, infra.y, me.x, me.y, infra.radius, viewHalf)) continue;
+          if (!isNearSight(infra, me, camera, infra.radius)) continue;
+          const p = worldToScreen(infra.x, infra.y, camera);
+          const rr = Math.max(18, infra.radius * camera.scale);
           viewCtx.beginPath();
           viewCtx.fillStyle = infra.type === 'electricity' ? 'rgba(250,204,21,.18)' : 'rgba(56,189,248,.18)';
-          viewCtx.arc(infra.x, infra.y, infra.radius, 0, Math.PI * 2);
+          viewCtx.arc(p.x, p.y, rr, 0, Math.PI * 2);
           viewCtx.fill();
           if (GameSprites.isReady()) {
-            GameSprites.drawInfrastructure(viewCtx, infra, infra.x, infra.y, infra.radius);
+            GameSprites.drawInfrastructure(viewCtx, infra, p.x, p.y, rr);
           }
         }
       }
 
-      const others = state.players.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
+      const others = interpPlayers.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
       for (const p of others) {
-        if (!inView(p.x, p.y, me.x, me.y, p.radius, viewHalf)) continue;
+        if (!isNearSight(p, me, camera, p.radius)) continue;
+        const sp = worldToScreen(p.x, p.y, camera);
+        const sr = Math.max(9, p.radius * camera.scale);
         if (GameSprites.isReady()) {
-          GameSprites.drawPlayer(viewCtx, p, p.x, p.y, p.radius);
+          GameSprites.drawPlayerScreen(viewCtx, p, sp.x, sp.y, sr);
         } else {
           viewCtx.beginPath();
           viewCtx.fillStyle = p.color;
-          viewCtx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+          viewCtx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
           viewCtx.fill();
         }
-        viewCtx.font = `700 ${12 / scale}px sans-serif`;
+        viewCtx.font = '700 11px sans-serif';
         viewCtx.textAlign = 'center';
         viewCtx.fillStyle = '#fff';
         viewCtx.strokeStyle = 'rgba(0,0,0,.7)';
-        viewCtx.lineWidth = 3 / scale;
-        viewCtx.strokeText(p.name, p.x, p.y - p.radius - 8 / scale);
-        viewCtx.fillText(p.name, p.x, p.y - p.radius - 8 / scale);
+        viewCtx.lineWidth = 3;
+        viewCtx.strokeText(p.name, sp.x, sp.y - sr - 7);
+        viewCtx.fillText(p.name, sp.x, sp.y - sr - 7);
       }
 
       if (me.alive) {
+        const sp = worldToScreen(me.x, me.y, camera);
+        const sr = Math.max(13, me.radius * camera.scale);
         if (GameSprites.isReady()) {
-          GameSprites.drawPlayer(viewCtx, me, me.x, me.y, me.radius, { highlight: true });
+          GameSprites.drawPlayerScreen(viewCtx, me, sp.x, sp.y, sr, { highlight: true });
         } else {
           viewCtx.beginPath();
           viewCtx.fillStyle = me.color;
-          viewCtx.arc(me.x, me.y, me.radius, 0, Math.PI * 2);
+          viewCtx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
           viewCtx.fill();
         }
-        viewCtx.font = `900 ${13 / scale}px sans-serif`;
+        viewCtx.font = '900 12px sans-serif';
         viewCtx.textAlign = 'center';
         viewCtx.fillStyle = '#fff';
         viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
-        viewCtx.lineWidth = 3 / scale;
-        viewCtx.strokeText('Bạn', me.x, me.y - me.radius - 10 / scale);
-        viewCtx.fillText('Bạn', me.x, me.y - me.radius - 10 / scale);
+        viewCtx.lineWidth = 3;
+        viewCtx.strokeText('Bạn', sp.x, sp.y - sr - 8);
+        viewCtx.fillText('Bạn', sp.x, sp.y - sr - 8);
       }
 
-      viewCtx.restore();
 
-      const grad = viewCtx.createRadialGradient(cx, cy, Math.min(w, h) * 0.28, cx, cy, Math.min(w, h) * 0.55);
-      grad.addColorStop(0, 'rgba(7,17,31,0)');
-      grad.addColorStop(1, 'rgba(7,17,31,.72)');
-      viewCtx.fillStyle = grad;
-      viewCtx.fillRect(0, 0, w, h);
-
+      drawSightMask(w, h, camera);
       requestAnimationFrame(renderViewport);
     }
 
@@ -252,8 +328,13 @@
     const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
     let controlTimer = null;
 
+    let lastControl = { x: 999, y: 999 };
     function emitControl(x, y) {
       if (!myId) return;
+      // Server giữ hướng cho tới khi đổi → chỉ gửi khi thực sự thay đổi để tránh spam socket
+      if (Math.abs(x - lastControl.x) < 0.02 && Math.abs(y - lastControl.y) < 0.02) return;
+      lastControl.x = x;
+      lastControl.y = y;
       socket.emit('control', { x, y });
     }
 
@@ -287,7 +368,7 @@
     }
 
     function setKnob(dx, dy) {
-      const max = 58;
+      const max = Math.max(32, joystick.clientWidth / 2 - knob.offsetWidth / 2 - 4);
       const len = Math.hypot(dx, dy);
       const k = len > max ? max / len : 1;
       const x = dx * k;
@@ -295,7 +376,7 @@
       knob.style.transform = `translate(${x}px, ${y}px)`;
       joystickDir.x = x / max;
       joystickDir.y = y / max;
-      pushControl();
+      // Không emit ở đây; vòng lặp 50ms (pushControl) sẽ gửi có kiểm soát tần suất
     }
 
     function resetKnob() {
