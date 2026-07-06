@@ -48,7 +48,11 @@
 
       <div class="panel joystick-wrap">
         <div class="joystick" id="joystick"><div class="knob" id="knob"></div></div>
-        <div class="small" style="margin-top:10px;text-align:center">Kéo joystick hoặc dùng WASD. Bạn chỉ thấy khu vực gần mình — màn host hiển thị toàn bộ đảo.</div>
+        <div class="action-buttons" id="actionButtons">
+          <button type="button" class="action-btn" id="btnSplit">Tách</button>
+          <button type="button" class="action-btn" id="btnEject">Bắn vốn</button>
+        </div>
+        <div class="small" style="margin-top:10px;text-align:center">Di chuột để di chuyển (mobile: joystick) · Space: tách · W: bắn vốn</div>
       </div>
 
       <div class="panel vote-buttons hide" id="voteButtons">
@@ -126,6 +130,9 @@
       hud.classList.remove('hide');
       document.getElementById('playerName').textContent = player.name;
       if (document.activeElement) document.activeElement.blur();
+      const box = viewCanvas.parentElement.getBoundingClientRect();
+      mouseClient.x = box.left + box.width / 2;
+      mouseClient.y = box.top + box.height / 2;
       startControlLoop();
       resizeViewport();
       requestAnimationFrame(renderViewport);
@@ -270,6 +277,30 @@
       viewCtx.fillRect(0, 0, w, h);
     }
 
+    function playerCells(p) {
+      if (p?.cells?.length) return p.cells;
+      return [{ id: p.id, x: p.x, y: p.y, radius: p.radius, mass: p.mass }];
+    }
+
+    function largestCell(p) {
+      const cells = playerCells(p);
+      return cells.reduce((a, b) => (b.mass > a.mass ? b : a), cells[0]);
+    }
+
+    function drawCell(ctx, player, cell, camera, opts = {}) {
+      const sp = worldToScreen(cell.x, cell.y, camera);
+      const sr = Math.max(9, cell.radius * camera.scale);
+      if (GameSprites.isReady()) {
+        GameSprites.drawPlayerScreen(ctx, player, sp.x, sp.y, sr, opts);
+      } else {
+        ctx.beginPath();
+        ctx.fillStyle = player.color;
+        ctx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      return { sp, sr };
+    }
+
     function renderViewport() {
       const box = viewCanvas.parentElement.getBoundingClientRect();
       const w = box.width;
@@ -288,22 +319,31 @@
         return;
       }
 
-      // CHÍNH mình: smoothing độ trễ thấp (bám sát server) → phản hồi nhạy như bản main nhưng không giật
+      const interpMe = interpPlayers.find(p => p.id === myId) || serverMe;
+      const lcInterp = largestCell(interpMe);
+      const lcServer = largestCell(serverMe);
+
       const nowTs = performance.now();
       const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
       lastFrameTs = nowTs;
-      if (!selfRender) selfRender = { x: serverMe.x, y: serverMe.y };
-      const dxs = serverMe.x - selfRender.x;
-      const dys = serverMe.y - selfRender.y;
+      if (!selfRender) selfRender = { x: lcInterp.x, y: lcInterp.y };
+      const dxs = lcServer.x - selfRender.x;
+      const dys = lcServer.y - selfRender.y;
       if (dxs * dxs + dys * dys > 300 * 300) {
-        selfRender.x = serverMe.x;
-        selfRender.y = serverMe.y;
+        selfRender.x = lcServer.x;
+        selfRender.y = lcServer.y;
       } else {
         const k = 1 - Math.pow(1 - 0.4, dt * 60);
         selfRender.x += dxs * k;
         selfRender.y += dys * k;
       }
-      const me = { ...serverMe, x: selfRender.x, y: selfRender.y };
+      const me = {
+        ...interpMe,
+        x: selfRender.x,
+        y: selfRender.y,
+        radius: lcInterp.radius,
+        mass: serverMe.mass,
+      };
 
       const camera = cameraFor(me, w, h);
       drawInfiniteMap(camera, w, h);
@@ -337,55 +377,63 @@
         }
       }
 
-      const others = interpPlayers.filter(p => p.id !== myId && p.alive).sort((a, b) => a.radius - b.radius);
+      for (const e of state.ejected || []) {
+        if (!isNearSight(e, me, camera, e.radius)) continue;
+        const ep = worldToScreen(e.x, e.y, camera);
+        const er = Math.max(4, e.radius * camera.scale);
+        GameSprites.drawEjectedMass(viewCtx, ep.x, ep.y, er, e.color);
+      }
+
+      const others = interpPlayers.filter(p => p.id !== myId && p.alive);
       for (const p of others) {
-        if (!isNearSight(p, me, camera, p.radius)) continue;
-        const sp = worldToScreen(p.x, p.y, camera);
-        const sr = Math.max(9, p.radius * camera.scale);
-        if (GameSprites.isReady()) {
-          GameSprites.drawPlayerScreen(viewCtx, p, sp.x, sp.y, sr);
-        } else {
-          viewCtx.beginPath();
-          viewCtx.fillStyle = p.color;
-          viewCtx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
-          viewCtx.fill();
+        const cells = playerCells(p).slice().sort((a, b) => a.radius - b.radius);
+        let drewName = false;
+        for (const cell of cells) {
+          if (!isNearSight(cell, me, camera, cell.radius)) continue;
+          const { sp, sr } = drawCell(viewCtx, p, cell, camera);
+          if (!drewName) {
+            viewCtx.font = '700 11px sans-serif';
+            viewCtx.textAlign = 'center';
+            viewCtx.fillStyle = '#fff';
+            viewCtx.strokeStyle = 'rgba(0,0,0,.7)';
+            viewCtx.lineWidth = 3;
+            viewCtx.strokeText(p.name, sp.x, sp.y - sr - 7);
+            viewCtx.fillText(p.name, sp.x, sp.y - sr - 7);
+            drewName = true;
+          }
         }
-        viewCtx.font = '700 11px sans-serif';
-        viewCtx.textAlign = 'center';
-        viewCtx.fillStyle = '#fff';
-        viewCtx.strokeStyle = 'rgba(0,0,0,.7)';
-        viewCtx.lineWidth = 3;
-        viewCtx.strokeText(p.name, sp.x, sp.y - sr - 7);
-        viewCtx.fillText(p.name, sp.x, sp.y - sr - 7);
       }
 
       if (me.alive) {
-        const sp = worldToScreen(me.x, me.y, camera);
-        const sr = Math.max(13, me.radius * camera.scale);
-        if (GameSprites.isReady()) {
-          GameSprites.drawPlayerScreen(viewCtx, me, sp.x, sp.y, sr, { highlight: true });
-        } else {
-          viewCtx.beginPath();
-          viewCtx.fillStyle = me.color;
-          viewCtx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
-          viewCtx.fill();
+        const myCells = playerCells(interpMe).slice().sort((a, b) => a.radius - b.radius);
+        let labelCell = null;
+        let labelPos = null;
+        for (const cell of myCells) {
+          const { sp, sr } = drawCell(viewCtx, me, cell, camera, { highlight: true });
+          if (!labelCell || cell.mass >= labelCell.mass) {
+            labelCell = cell;
+            labelPos = { sp, sr };
+          }
         }
-        viewCtx.font = '900 12px sans-serif';
-        viewCtx.textAlign = 'center';
-        viewCtx.fillStyle = '#fff';
-        viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
-        viewCtx.lineWidth = 3;
-        viewCtx.strokeText('Bạn', sp.x, sp.y - sr - 8);
-        viewCtx.fillText('Bạn', sp.x, sp.y - sr - 8);
+        if (labelPos) {
+          const { sp, sr } = labelPos;
+          viewCtx.font = '900 12px sans-serif';
+          viewCtx.textAlign = 'center';
+          viewCtx.fillStyle = '#fff';
+          viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
+          viewCtx.lineWidth = 3;
+          viewCtx.strokeText('Bạn', sp.x, sp.y - sr - 8);
+          viewCtx.fillText('Bạn', sp.x, sp.y - sr - 8);
 
-        const massLabel = `Quy mô: ${Math.round(me.mass)}`;
-        const massY = sp.y + sr + Math.max(12, sr * 0.28);
-        viewCtx.font = `900 ${Math.max(12, sr * 0.34)}px sans-serif`;
-        viewCtx.fillStyle = '#23352F';
-        viewCtx.strokeStyle = 'rgba(255,255,255,.92)';
-        viewCtx.lineWidth = 3;
-        viewCtx.strokeText(massLabel, sp.x, massY);
-        viewCtx.fillText(massLabel, sp.x, massY);
+          const massLabel = `Quy mô: ${Math.round(me.mass)}`;
+          const massY = sp.y + sr + Math.max(12, sr * 0.28);
+          viewCtx.font = `900 ${Math.max(12, sr * 0.34)}px sans-serif`;
+          viewCtx.fillStyle = '#23352F';
+          viewCtx.strokeStyle = 'rgba(255,255,255,.92)';
+          viewCtx.lineWidth = 3;
+          viewCtx.strokeText(massLabel, sp.x, massY);
+          viewCtx.fillText(massLabel, sp.x, massY);
+        }
       }
 
 
@@ -395,42 +443,74 @@
 
     let joystickActive = false;
     let joystickDir = { x: 0, y: 0 };
-    const keys = new Set();
-    const GAME_KEYS = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+    let mouseClient = { x: 0, y: 0 };
+    const preferMouse = !window.matchMedia('(pointer: coarse)').matches;
     let controlTimer = null;
 
-    let lastControl = { x: 999, y: 999 };
-    function emitControl(x, y) {
-      if (!myId) return;
-      // Server giữ hướng cho tới khi đổi → chỉ gửi khi thực sự thay đổi để tránh spam socket
-      if (Math.abs(x - lastControl.x) < 0.02 && Math.abs(y - lastControl.y) < 0.02) return;
-      lastControl.x = x;
-      lastControl.y = y;
-      socket.emit('control', { x, y });
+    let lastControl = { x: 999999, y: 999999 };
+
+    function cameraMe() {
+      const serverMe = state?.players?.find(p => p.id === myId);
+      if (!serverMe) return null;
+      const lc = largestCell(serverMe);
+      return {
+        x: selfRender?.x ?? lc.x,
+        y: selfRender?.y ?? lc.y,
+        radius: lc.radius,
+      };
     }
 
-    function keyboardVector() {
-      let x = 0, y = 0;
-      if (keys.has('ArrowLeft') || keys.has('KeyA')) x -= 1;
-      if (keys.has('ArrowRight') || keys.has('KeyD')) x += 1;
-      if (keys.has('ArrowUp') || keys.has('KeyW')) y -= 1;
-      if (keys.has('ArrowDown') || keys.has('KeyS')) y += 1;
-      return { x, y };
+    function screenToWorld(clientX, clientY) {
+      const me = cameraMe();
+      if (!me || !state) return null;
+      const box = viewCanvas.parentElement.getBoundingClientRect();
+      const w = box.width;
+      const h = box.height;
+      const camera = cameraFor(me, w, h);
+      return {
+        x: (clientX - box.left - camera.x) / camera.scale,
+        y: (clientY - box.top - camera.y) / camera.scale,
+      };
+    }
+
+    function emitControlTarget(wx, wy) {
+      if (!myId) return;
+      if (Math.abs(wx - lastControl.x) < 2 && Math.abs(wy - lastControl.y) < 2) return;
+      lastControl.x = wx;
+      lastControl.y = wy;
+      socket.emit('control', { x: wx, y: wy });
+    }
+
+    function emitAction(action) {
+      if (!myId) return;
+      socket.emit('action', { action });
     }
 
     function pushControl() {
       if (!myId) return;
       if (joystickActive) {
-        emitControl(joystickDir.x, joystickDir.y);
+        const me = cameraMe();
+        if (!me) return;
+        const len = Math.hypot(joystickDir.x, joystickDir.y);
+        if (len < 0.05) {
+          emitControlTarget(me.x, me.y);
+          return;
+        }
+        emitControlTarget(
+          me.x + (joystickDir.x / len) * 800,
+          me.y + (joystickDir.y / len) * 800
+        );
         return;
       }
-      const { x, y } = keyboardVector();
-      emitControl(x, y);
+      if (preferMouse) {
+        const world = screenToWorld(mouseClient.x, mouseClient.y);
+        if (world) emitControlTarget(world.x, world.y);
+      }
     }
 
     function startControlLoop() {
       if (controlTimer) return;
-      controlTimer = setInterval(pushControl, 50);
+      controlTimer = setInterval(pushControl, 40);
     }
 
     function joystickCenter() {
@@ -454,7 +534,8 @@
       knob.style.transform = 'translate(0px, 0px)';
       joystickDir = { x: 0, y: 0 };
       joystickActive = false;
-      pushControl();
+      const me = cameraMe();
+      if (me) emitControlTarget(me.x, me.y);
     }
 
     function pointerPos(e) {
@@ -493,24 +574,24 @@
     joystick.addEventListener('pointercancel', onJoystickEnd);
     joystick.addEventListener('lostpointercapture', () => { if (joystickActive) resetKnob(); });
 
+    document.addEventListener('mousemove', e => {
+      mouseClient.x = e.clientX;
+      mouseClient.y = e.clientY;
+    });
+
     window.addEventListener('keydown', e => {
-      if (!myId || !GAME_KEYS.has(e.code)) return;
-      if (e.target.closest('input, textarea, select')) return;
-      e.preventDefault();
-      keys.add(e.code);
-      pushControl();
+      if (!myId || e.target.closest('input, textarea, select')) return;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        emitAction('split');
+      } else if (e.code === 'KeyW') {
+        e.preventDefault();
+        emitAction('eject');
+      }
     });
 
-    window.addEventListener('keyup', e => {
-      if (!GAME_KEYS.has(e.code)) return;
-      keys.delete(e.code);
-      pushControl();
-    });
-
-    window.addEventListener('blur', () => {
-      keys.clear();
-      if (!joystickActive) pushControl();
-    });
+    document.getElementById('btnSplit').addEventListener('click', () => emitAction('split'));
+    document.getElementById('btnEject').addEventListener('click', () => emitAction('eject'));
 
     document.querySelectorAll('[data-vote]').forEach(btn => {
       btn.addEventListener('click', () => {

@@ -423,6 +423,7 @@ body.player-playing .mini-map {
   border: 0;
   border-radius: 0;
   box-shadow: none;
+  cursor: crosshair;
 }
 #viewCanvas {
   display: block;
@@ -496,6 +497,38 @@ body.player-playing .joystick-wrap:active {
 }
 body.player-playing .joystick-wrap .small {
   display: none;
+}
+body.player-playing .joystick-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.action-buttons {
+  display: flex;
+  gap: 8px;
+}
+.action-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font: 800 13px/1 sans-serif;
+  color: #23352F;
+  background: rgba(231, 242, 221, .88);
+  box-shadow: 0 8px 20px rgba(35, 53, 47, .16);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.action-btn:active {
+  transform: scale(.96);
+}
+body.player-playing .action-buttons {
+  flex-direction: row;
+}
+body.player-playing .action-btn {
+  padding: 8px 14px;
+  font-size: 12px;
+  background: rgba(231, 242, 221, .72);
 }
 .joystick {
   width: 190px;
