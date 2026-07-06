@@ -142,6 +142,8 @@
     const PROJECTOR_SCALE = 1;
 
     let state = null;
+    let resourceCache = [];
+    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
     let camera = { x: 0, y: 0, scale: 0.58 };
     let lastJoinUrl = '';
     let lastFrameAt = performance.now();
@@ -350,7 +352,7 @@
       const screenR = Math.max(4, r.radius * camera.scale);
       drawGlow(p.x, p.y, screenR, resourceGlowColor(r.type));
       if (GameSprites.isReady()) {
-        GameSprites.drawResourceScreen(ctx, r, p.x, p.y, screenR);
+        GameSprites.drawResourceScreen(ctx, r, p.x, p.y, screenR, { lite: true });
         return;
       }
       ctx.save();
@@ -416,9 +418,9 @@
       drawMap();
       drawDecorations();
       if (state) {
-        state.resources.forEach(drawResource);
+        resourceCache.forEach(drawResource);
         state.infrastructures.forEach(drawInfrastructure);
-        smoothedPlayers(state.players, dt).slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
+        state.players.slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
       }
       requestAnimationFrame(render);
     }
@@ -514,10 +516,18 @@
       });
     }
 
+    let lastUiUpdate = 0;
     socket.on('state', s => {
       state = s;
+      if (s.resources) resourceCache = s.resources;
+      if (s.players) playerBuffer.push(s.players);
       fitWorld();
-      updateUI();
+      // DOM của sidebar/leaderboard/sự kiện nặng → cập nhật ~8Hz thay vì 30Hz
+      const now = performance.now();
+      if (now - lastUiUpdate > 120) {
+        lastUiUpdate = now;
+        updateUI();
+      }
     });
 
     function startGame() {

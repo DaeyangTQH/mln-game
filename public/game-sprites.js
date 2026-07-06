@@ -196,22 +196,27 @@ window.GameSprites = (() => {
     ctx.restore();
   }
 
-  function drawResourceScreen(ctx, resource, sx, sy, screenRadius) {
+  function drawResourceScreen(ctx, resource, sx, sy, screenRadius, opts = {}) {
     const sprite = RESOURCE_SPRITE[resource.type] ?? 0;
     const size = Math.max(screenRadius * RESOURCE_DIAMETER_SCALE, 8);
     const style = RESOURCE_STYLE[resource.type] || RESOURCE_STYLE.capital;
+    const lite = opts.lite; // bỏ shadowBlur khi vẽ số lượng lớn (màn host) để giữ FPS
     ctx.save();
     ctx.beginPath();
     ctx.fillStyle = style.fill;
     ctx.strokeStyle = style.ring;
     ctx.lineWidth = Math.max(1.5, screenRadius * 0.18);
-    ctx.shadowColor = style.glow;
-    ctx.shadowBlur = Math.max(5, screenRadius * 0.7);
+    if (!lite) {
+      ctx.shadowColor = style.glow;
+      ctx.shadowBlur = Math.max(5, screenRadius * 0.7);
+    }
     ctx.arc(sx, sy, screenRadius * 1.18, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
-    ctx.shadowColor = 'rgba(0,0,0,.5)';
-    ctx.shadowBlur = 4;
+    if (!lite) {
+      ctx.shadowColor = 'rgba(0,0,0,.5)';
+      ctx.shadowBlur = 4;
+    }
     drawSprite(ctx, 'icons', sprite, sx, sy, size);
     ctx.restore();
   }
@@ -236,6 +241,63 @@ window.GameSprites = (() => {
       ctx.fillText(`Kiểm soát: ${infra.ownerName}`, x, y + radius + 38);
     }
     ctx.restore();
+  }
+
+  // Bộ đệm snapshot để nội suy vị trí (chống giật khi server chỉ gửi 30Hz)
+  function createSnapshotBuffer(options = {}) {
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const delay = options.delay ?? 80;
+    const max = options.max ?? 16;
+    const snapThreshold = options.snap ?? 300;
+    const snapSq = snapThreshold * snapThreshold;
+    const buffer = [];
+
+    function push(players) {
+      buffer.push({ t: now(), players: players || [] });
+      if (buffer.length > max) buffer.shift();
+    }
+
+    function sample(nowTs) {
+      const t = (nowTs ?? now()) - delay;
+      if (buffer.length === 0) return [];
+      if (buffer.length === 1) return buffer[0].players;
+
+      let older = buffer[0];
+      let newer = buffer[buffer.length - 1];
+      if (t >= newer.t) {
+        older = buffer[buffer.length - 2];
+      } else {
+        for (let i = 0; i < buffer.length - 1; i++) {
+          if (buffer[i].t <= t && buffer[i + 1].t >= t) { older = buffer[i]; newer = buffer[i + 1]; break; }
+        }
+      }
+
+      const span = newer.t - older.t || 1;
+      let alpha = (t - older.t) / span;
+      alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+
+      const olderById = new Map();
+      for (const p of older.players) olderById.set(p.id, p);
+
+      return newer.players.map((np) => {
+        const op = olderById.get(np.id);
+        if (!op) return np;
+        const dx = np.x - op.x;
+        const dy = np.y - op.y;
+        // Nhảy quá xa (respawn/teleport) → không nội suy để tránh trượt ngang màn
+        if (dx * dx + dy * dy > snapSq) return np;
+        return {
+          ...np,
+          x: op.x + dx * alpha,
+          y: op.y + dy * alpha,
+          radius: op.radius + (np.radius - op.radius) * alpha,
+        };
+      });
+    }
+
+    function reset() { buffer.length = 0; }
+
+    return { push, sample, reset };
   }
 
   function buildLogoPicker(container, onSelect, initial = 0) {
@@ -278,6 +340,7 @@ window.GameSprites = (() => {
     drawResourceScreen,
     drawInfrastructure,
     buildLogoPicker,
+    createSnapshotBuffer,
     playerViewHalf,
     frame,
   };
