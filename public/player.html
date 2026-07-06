@@ -187,6 +187,27 @@
       return Math.hypot(item.x - me.x, item.y - me.y) <= camera.sightRadius + margin;
     }
 
+    function drawPlayerText(player, x, y, radius, nameLabel, isMe = false) {
+      const scoreLabel = `${Math.round(player.score || 0)} điểm`;
+      viewCtx.save();
+      viewCtx.textAlign = 'center';
+      viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
+      viewCtx.lineJoin = 'round';
+
+      viewCtx.font = `${isMe ? 900 : 700} ${isMe ? 12 : 11}px sans-serif`;
+      viewCtx.fillStyle = '#fff';
+      viewCtx.lineWidth = 3;
+      viewCtx.strokeText(nameLabel, x, y - radius - (isMe ? 8 : 7));
+      viewCtx.fillText(nameLabel, x, y - radius - (isMe ? 8 : 7));
+
+      viewCtx.font = `${isMe ? 800 : 700} ${isMe ? 12 : 11}px sans-serif`;
+      viewCtx.fillStyle = isMe ? '#bae6fd' : 'rgba(255,255,255,.92)';
+      viewCtx.lineWidth = 3;
+      viewCtx.strokeText(scoreLabel, x, y + radius + 16);
+      viewCtx.fillText(scoreLabel, x, y + radius + 16);
+      viewCtx.restore();
+    }
+
     function drawInfiniteMap(camera, w, h) {
       const world = state.world;
       viewCtx.fillStyle = '#23413b';
@@ -300,13 +321,7 @@
           viewCtx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
           viewCtx.fill();
         }
-        viewCtx.font = '700 11px sans-serif';
-        viewCtx.textAlign = 'center';
-        viewCtx.fillStyle = '#fff';
-        viewCtx.strokeStyle = 'rgba(0,0,0,.7)';
-        viewCtx.lineWidth = 3;
-        viewCtx.strokeText(p.name, sp.x, sp.y - sr - 7);
-        viewCtx.fillText(p.name, sp.x, sp.y - sr - 7);
+        drawPlayerText(p, sp.x, sp.y, sr, p.name);
       }
 
       if (me.alive) {
@@ -320,13 +335,7 @@
           viewCtx.arc(sp.x, sp.y, sr, 0, Math.PI * 2);
           viewCtx.fill();
         }
-        viewCtx.font = '900 12px sans-serif';
-        viewCtx.textAlign = 'center';
-        viewCtx.fillStyle = '#fff';
-        viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
-        viewCtx.lineWidth = 3;
-        viewCtx.strokeText('Bạn', sp.x, sp.y - sr - 8);
-        viewCtx.fillText('Bạn', sp.x, sp.y - sr - 8);
+        drawPlayerText(me, sp.x, sp.y, sr, 'Bạn', true);
       }
 
 

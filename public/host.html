@@ -403,7 +403,7 @@
       ctx.fillText(p.name, pos.x, labelY);
       ctx.font = `700 ${Math.max(11, screenR * 0.3)}px sans-serif`;
       ctx.fillStyle = 'rgba(255,255,255,.9)';
-      ctx.fillText(`${Math.round(p.mass)} lực`, pos.x, pos.y + screenR * 0.38);
+      ctx.fillText(`${p.score} điểm`, pos.x, pos.y + screenR * 0.38);
       ctx.restore();
     }
 
@@ -496,7 +496,7 @@
         <div class="leader-row">
           <span>#${p.rank}</span>
           <span><i class="sprite-chip logo-chip" data-sheet="logos" data-idx="${p.logoIndex ?? 0}"></i>${p.name}</span>
-          <strong>${p.share}%</strong>
+          <strong>${p.score} điểm</strong>
         </div>
       `).join('') || '<div style="font-size:13px;color:var(--hc-text-muted)">Chưa có doanh nghiệp.</div>';
 
