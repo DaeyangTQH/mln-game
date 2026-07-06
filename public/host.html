@@ -352,7 +352,22 @@
     function drawPlayer(p) {
       const pos = worldToScreen(p.x, p.y);
       const screenR = Math.max(6, p.radius * camera.scale * PROJECTOR_SCALE);
-      drawGlow(pos.x, pos.y, screenR, p.color || '#7BA392');
+
+      // Quầng mờ + viền hitbox — trùng radius server (screenR)
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, screenR + 4, 0, Math.PI * 2);
+      ctx.fillStyle = p.color || '#7BA392';
+      ctx.globalAlpha = 0.3;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,.88)';
+      ctx.lineWidth = Math.max(1.5, screenR * 0.07);
+      ctx.stroke();
+      ctx.restore();
+
       ctx.save();
       if (GameSprites.isReady()) {
         GameSprites.drawPlayerScreen(ctx, p, pos.x, pos.y, screenR);
@@ -362,18 +377,27 @@
         ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
         ctx.fill();
       }
-      const labelY = pos.y - screenR - 10;
+
       const nameSize = Math.max(13, screenR * 0.42);
       ctx.font = `900 ${nameSize}px sans-serif`;
       ctx.textAlign = 'center';
+      ctx.textBaseline = 'alphabetic';
       ctx.fillStyle = '#f4faf6';
       ctx.strokeStyle = 'rgba(35,53,47,.9)';
       ctx.lineWidth = 4;
+      const labelY = pos.y - screenR - Math.max(8, screenR * 0.18);
       ctx.strokeText(p.name, pos.x, labelY);
       ctx.fillText(p.name, pos.x, labelY);
-      ctx.font = `700 ${Math.max(11, screenR * 0.3)}px sans-serif`;
-      ctx.fillStyle = 'rgba(255,255,255,.9)';
-      ctx.fillText(`${Math.round(p.mass)} lực`, pos.x, pos.y + screenR * 0.38);
+
+      const massSize = Math.max(11, screenR * 0.32);
+      ctx.font = `700 ${massSize}px sans-serif`;
+      ctx.fillStyle = '#f4faf6';
+      ctx.strokeStyle = 'rgba(35,53,47,.9)';
+      ctx.lineWidth = 3;
+      const massY = pos.y + screenR + Math.max(12, massSize * 0.9);
+      const massLabel = `Quy mô: ${Math.round(p.mass)}`;
+      ctx.strokeText(massLabel, pos.x, massY);
+      ctx.fillText(massLabel, pos.x, massY);
       ctx.restore();
     }
 

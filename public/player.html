@@ -26,8 +26,8 @@
           <div class="sub" id="phaseText">Giai đoạn 1 · Cạnh tranh tự do</div>
         </div>
         <div style="text-align:right">
-          <div class="kicker">Điểm</div>
-          <div style="font-size:28px;font-weight:950" id="score">0</div>
+          <div class="kicker">Quy mô</div>
+          <div style="font-size:28px;font-weight:950" id="massDisplay">0</div>
         </div>
       </div>
 
@@ -83,8 +83,30 @@
     const viewportStats = document.getElementById('viewportStats');
     const mapImage = new Image();
     let mapReady = false;
-    mapImage.onload = () => { mapReady = true; };
+    // Chỉ player: bake PNG → canvas world-size 1 lần, tránh scale lại mỗi frame (host không đụng)
+    let playerMapCanvas = null;
+    let playerMapWorldKey = '';
+    mapImage.onload = () => {
+      mapReady = true;
+      if (state?.world) ensurePlayerMapBake(state.world);
+    };
     mapImage.src = GameSprites.ASSET.tiles.island;
+
+    function ensurePlayerMapBake(world) {
+      if (!mapReady || !world) return null;
+      const key = `${world.width}x${world.height}`;
+      if (playerMapCanvas && playerMapWorldKey === key) return playerMapCanvas;
+      const baked = document.createElement('canvas');
+      baked.width = world.width;
+      baked.height = world.height;
+      const bctx = baked.getContext('2d');
+      bctx.imageSmoothingEnabled = true;
+      if ('imageSmoothingQuality' in bctx) bctx.imageSmoothingQuality = 'high';
+      bctx.drawImage(mapImage, 0, 0, world.width, world.height);
+      playerMapCanvas = baked;
+      playerMapWorldKey = key;
+      return playerMapCanvas;
+    }
     GameSprites.loadAll();
     GameSprites.buildLogoPicker(document.getElementById('logoPicker'), idx => { selectedLogo = idx; }, 0);
 
@@ -111,6 +133,7 @@
 
     socket.on('state', s => {
       state = s;
+      if (s.world) ensurePlayerMapBake(s.world);
       if (s.resources) resourceCache = s.resources;
       if (s.players) playerBuffer.push(s.players);
       if (!myId) return;
@@ -118,15 +141,15 @@
       document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
       voteButtons.classList.toggle('hide', state.phase !== 3);
       if (me) {
-        document.getElementById('score').textContent = me.score;
-        viewportStats.textContent = `Quy mô: ${Math.round(me.mass)} · Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
+        document.getElementById('massDisplay').textContent = Math.round(me.mass);
+        viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
         viewportOverlay.classList.toggle('hide', me.alive);
       }
     });
 
     function resizeViewport() {
       const box = viewCanvas.parentElement.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
       viewCanvas.width = Math.max(1, Math.floor(box.width * dpr));
       viewCanvas.height = Math.max(1, Math.floor(box.height * dpr));
       viewCanvas.style.width = `${box.width}px`;
@@ -139,8 +162,20 @@
 
     function cameraFor(me, w, h) {
       const baseHalf = GameSprites.playerViewHalf(me ? me.radius : 18, Math.min(w, h));
-      const viewHalf = Math.max(280, Math.min(460, baseHalf * 1.2));
-      const scale = Math.min(w, h) / (viewHalf * 2);
+      let viewHalf = Math.max(280, Math.min(460, baseHalf * 1.2));
+      let scale = Math.min(w, h) / (viewHalf * 2);
+
+      // Chỉ player: không zoom quá mức làm map bị phóng to vượt pixel đã bake
+      if (mapReady && state?.world) {
+        const baked = ensurePlayerMapBake(state.world);
+        const texW = baked ? state.world.width : (mapImage.naturalWidth || state.world.width);
+        const maxSharpScale = texW / state.world.width;
+        if (scale > maxSharpScale) {
+          scale = maxSharpScale;
+          viewHalf = Math.min(w, h) / (2 * scale);
+        }
+      }
+
       return {
         scale,
         viewHalf,
@@ -165,10 +200,14 @@
       const world = state.world;
       viewCtx.fillStyle = '#23413b';
       viewCtx.fillRect(0, 0, w, h);
+      if (!mapReady) return;
 
-      viewCtx.save();
-      viewCtx.translate(camera.x, camera.y);
-      viewCtx.scale(camera.scale, camera.scale);
+      const baked = ensurePlayerMapBake(world);
+      const mapSource = baked || mapImage;
+      const imgW = baked ? world.width : (mapImage.naturalWidth || world.width);
+      const imgH = baked ? world.height : (mapImage.naturalHeight || world.height);
+      const srcPerWorldX = imgW / world.width;
+      const srcPerWorldY = imgH / world.height;
 
       const left = -camera.x / camera.scale;
       const top = -camera.y / camera.scale;
@@ -177,20 +216,43 @@
       const startX = Math.floor(left / world.width) * world.width;
       const startY = Math.floor(top / world.height) * world.height;
 
-      if (mapReady) {
-        for (let x = startX; x < right; x += world.width) {
-          for (let y = startY; y < bottom; y += world.height) {
-            viewCtx.globalAlpha = x === 0 && y === 0 ? 1 : 0.42;
-            viewCtx.drawImage(mapImage, x, y, world.width, world.height);
-          }
+      const upscale = camera.scale * (world.width / imgW);
+      viewCtx.save();
+      viewCtx.imageSmoothingEnabled = upscale > 1.02;
+      if ('imageSmoothingQuality' in viewCtx) viewCtx.imageSmoothingQuality = 'high';
+
+      for (let tileX = startX; tileX < right; tileX += world.width) {
+        for (let tileY = startY; tileY < bottom; tileY += world.height) {
+          const ix = Math.max(left, tileX);
+          const iy = Math.max(top, tileY);
+          const ix2 = Math.min(right, tileX + world.width);
+          const iy2 = Math.min(bottom, tileY + world.height);
+          if (ix >= ix2 || iy >= iy2) continue;
+
+          const localX = ix - tileX;
+          const localY = iy - tileY;
+          const localW = ix2 - ix;
+          const localH = iy2 - iy;
+
+          viewCtx.globalAlpha = tileX === 0 && tileY === 0 ? 1 : 0.42;
+          viewCtx.drawImage(
+            mapSource,
+            Math.floor(localX * srcPerWorldX), Math.floor(localY * srcPerWorldY),
+            Math.ceil(localW * srcPerWorldX), Math.ceil(localH * srcPerWorldY),
+            Math.round(camera.x + ix * camera.scale), Math.round(camera.y + iy * camera.scale),
+            Math.round(localW * camera.scale), Math.round(localH * camera.scale)
+          );
         }
-        viewCtx.globalAlpha = 1;
       }
+      viewCtx.globalAlpha = 1;
 
       viewCtx.strokeStyle = 'rgba(250, 204, 21, .9)';
-      viewCtx.lineWidth = 5 / camera.scale;
-      viewCtx.setLineDash([18 / camera.scale, 12 / camera.scale]);
-      viewCtx.strokeRect(0, 0, world.width, world.height);
+      viewCtx.lineWidth = Math.max(2, 5 * camera.scale);
+      viewCtx.setLineDash([Math.max(6, 18 * camera.scale), Math.max(4, 12 * camera.scale)]);
+      viewCtx.strokeRect(
+        Math.round(camera.x), Math.round(camera.y),
+        Math.round(world.width * camera.scale), Math.round(world.height * camera.scale)
+      );
       viewCtx.setLineDash([]);
       viewCtx.restore();
     }
@@ -202,8 +264,8 @@
       const outer = camera.sightRadius * camera.scale;
       const mask = viewCtx.createRadialGradient(cx, cy, inner, cx, cy, outer);
       mask.addColorStop(0, 'rgba(2, 6, 23, 0)');
-      mask.addColorStop(0.68, 'rgba(2, 6, 23, .28)');
-      mask.addColorStop(1, 'rgba(2, 6, 23, .9)');
+      mask.addColorStop(0.68, 'rgba(2, 6, 23, .16)');
+      mask.addColorStop(1, 'rgba(2, 6, 23, .72)');
       viewCtx.fillStyle = mask;
       viewCtx.fillRect(0, 0, w, h);
     }
@@ -315,6 +377,15 @@
         viewCtx.lineWidth = 3;
         viewCtx.strokeText('Bạn', sp.x, sp.y - sr - 8);
         viewCtx.fillText('Bạn', sp.x, sp.y - sr - 8);
+
+        const massLabel = `Quy mô: ${Math.round(me.mass)}`;
+        const massY = sp.y + sr + Math.max(12, sr * 0.28);
+        viewCtx.font = `900 ${Math.max(12, sr * 0.34)}px sans-serif`;
+        viewCtx.fillStyle = '#23352F';
+        viewCtx.strokeStyle = 'rgba(255,255,255,.92)';
+        viewCtx.lineWidth = 3;
+        viewCtx.strokeText(massLabel, sp.x, massY);
+        viewCtx.fillText(massLabel, sp.x, massY);
       }
 
 

@@ -129,7 +129,7 @@ window.GameSprites = (() => {
   function drawPlayerWorld(ctx, player, x, y, radius, opts = {}) {
     const logoIndex = Number.isInteger(player.logoIndex) ? player.logoIndex : 0;
     const diameter = radius * LOGO_DIAMETER_SCALE;
-    const clipR = radius * 1.04;
+    const clipR = radius;
     ctx.save();
     ctx.globalAlpha = player.alive === false ? 0.28 : 1;
     ctx.beginPath();
@@ -152,7 +152,7 @@ window.GameSprites = (() => {
   function drawPlayerScreen(ctx, player, sx, sy, screenRadius, opts = {}) {
     const logoIndex = Number.isInteger(player.logoIndex) ? player.logoIndex : 0;
     const diameter = screenRadius * LOGO_DIAMETER_SCALE;
-    const clipR = screenRadius * 1.04;
+    const clipR = screenRadius;
     ctx.save();
     ctx.globalAlpha = player.alive === false ? 0.28 : 1;
     ctx.beginPath();
