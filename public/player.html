@@ -30,6 +30,8 @@
           <div style="font-size:28px;font-weight:950" id="massDisplay">0</div>
         </div>
       </div>
+      <div class="player-effects" id="effectPanel"></div>
+      <div class="notice-stack" id="noticeStack"></div>
 
       <div class="mini-map panel">
         <canvas id="viewCanvas" aria-label="Khu vực xung quanh doanh nghiệp của bạn"></canvas>
@@ -85,6 +87,8 @@
     const viewCtx = viewCanvas.getContext('2d');
     const viewportOverlay = document.getElementById('viewportOverlay');
     const viewportStats = document.getElementById('viewportStats');
+    const effectPanel = document.getElementById('effectPanel');
+    const noticeStack = document.getElementById('noticeStack');
     const mapImage = new Image();
     let mapReady = false;
     // Chỉ player: bake PNG → canvas world-size 1 lần, tránh scale lại mỗi frame (host không đụng)
@@ -146,12 +150,22 @@
       if (!myId) return;
       const me = state.players.find(p => p.id === myId);
       document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
-      voteButtons.classList.toggle('hide', state.phase !== 3);
+      voteButtons.classList.toggle('hide', state.phase !== 5);
       if (me) {
         document.getElementById('massDisplay').textContent = Math.round(me.mass);
         viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
         viewportOverlay.classList.toggle('hide', me.alive);
       }
+    });
+
+    socket.on('personalState', data => {
+      if (!myId) return;
+      renderEffects(data?.effects || []);
+    });
+
+    socket.on('notice', notice => {
+      if (!myId && notice?.scope === 'personal') return;
+      showNotice(notice?.message, notice?.kind);
     });
 
     function resizeViewport() {
@@ -301,6 +315,66 @@
       return { sp, sr };
     }
 
+    function drawSpItem(item, camera) {
+      const p = worldToScreen(item.x, item.y, camera);
+      const r = Math.max(11, item.radius * camera.scale);
+      viewCtx.save();
+      viewCtx.beginPath();
+      viewCtx.fillStyle = item.color || '#f97316';
+      viewCtx.shadowColor = item.color || '#f97316';
+      viewCtx.shadowBlur = 12;
+      viewCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      viewCtx.fill();
+      viewCtx.shadowBlur = 0;
+      viewCtx.strokeStyle = 'rgba(255,255,255,.9)';
+      viewCtx.lineWidth = 2;
+      viewCtx.stroke();
+      viewCtx.font = `900 ${Math.max(8, r * 0.55)}px sans-serif`;
+      viewCtx.fillStyle = '#23352F';
+      viewCtx.textAlign = 'center';
+      viewCtx.textBaseline = 'middle';
+      viewCtx.fillText(item.icon || 'SP', p.x, p.y);
+      viewCtx.restore();
+    }
+
+    function drawPointBag(bag, camera) {
+      const p = worldToScreen(bag.x, bag.y, camera);
+      const r = Math.max(9, bag.radius * camera.scale);
+      viewCtx.save();
+      viewCtx.beginPath();
+      viewCtx.fillStyle = '#fbbf24';
+      viewCtx.shadowColor = 'rgba(251,191,36,.75)';
+      viewCtx.shadowBlur = 10;
+      viewCtx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      viewCtx.fill();
+      viewCtx.shadowBlur = 0;
+      viewCtx.strokeStyle = 'rgba(255,255,255,.9)';
+      viewCtx.lineWidth = 2;
+      viewCtx.stroke();
+      viewCtx.font = `900 ${Math.max(9, r * 0.7)}px sans-serif`;
+      viewCtx.fillStyle = '#23352F';
+      viewCtx.textAlign = 'center';
+      viewCtx.textBaseline = 'middle';
+      viewCtx.fillText('$', p.x, p.y);
+      viewCtx.restore();
+    }
+
+    function renderEffects(effects = []) {
+      effectPanel.innerHTML = effects.map(e => {
+        const seconds = Math.ceil((e.remainingMs || 0) / 1000);
+        return `<div class="effect-chip"><strong>${e.label}</strong><span>${seconds}s</span></div>`;
+      }).join('');
+    }
+
+    function showNotice(message, kind = 'info') {
+      if (!message) return;
+      const el = document.createElement('div');
+      el.className = `notice ${kind}`;
+      el.textContent = message;
+      noticeStack.appendChild(el);
+      setTimeout(() => el.remove(), 4200);
+    }
+
     function renderViewport() {
       const box = viewCanvas.parentElement.getBoundingClientRect();
       const w = box.width;
@@ -360,6 +434,16 @@
           viewCtx.arc(p.x, p.y, rr, 0, Math.PI * 2);
           viewCtx.fill();
         }
+      }
+
+      for (const bag of state.pointBags || []) {
+        if (!isNearSight(bag, me, camera, bag.radius)) continue;
+        drawPointBag(bag, camera);
+      }
+
+      for (const item of state.spItems || []) {
+        if (!isNearSight(item, me, camera, item.radius)) continue;
+        drawSpItem(item, camera);
       }
 
       if (state.phase >= 2) {

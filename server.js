@@ -1,4 +1,4 @@
-const express = require('express');
+  const express = require('express');
 const http = require('http');
 const os = require('os');
 const { Server } = require('socket.io');
@@ -31,6 +31,7 @@ const PLAYER_SPEED = 30;
 const RESOURCE_COUNT = 680;
 const PLAYER_START_RADIUS = 18;
 const PLAYER_START_MASS = Number(process.env.PLAYER_START_MASS) || 100;
+const MATCH_DURATION_MS = 2 * 60 * 1000;
 const RADIUS_GROWTH_SCALE = 1.5;       // ↑ lớn hơn = phình to nhanh hơn khi tăng mass
 const RESOURCE_MASS_GAIN = 5;         // ↑ lớn hơn = ăn tài nguyên tăng quy mô nhanh hơn
 const INFRA_PASSIVE_GAIN = 0.009;       // ↑ lớn hơn = thu nhập thụ động từ hạ tầng nhanh hơn
@@ -54,6 +55,16 @@ const EJECT_COOLDOWN_MS = 100;
 const EJECT_ANGLE_JITTER = 0.3;
 const EJECTED_TTL_MS = 12000;
 const CELL_IMPULSE_DECAY = 0.86;
+const SP_DROP_COOLDOWN_MS = 2 * 60 * 1000;
+const SP_ITEM_MIN_TTL_MS = 30 * 1000;
+const SP_ITEM_MAX_TTL_MS = 45 * 1000;
+const POINT_BAG_MIN_TTL_MS = 30 * 1000;
+const POINT_BAG_MAX_TTL_MS = 45 * 1000;
+const AUTO_MONOPOLY_START_MS = 7 * 60 * 1000;
+const AUTO_MONOPOLY_HOLD_MS = 30 * 1000;
+const AUTO_MONOPOLY_CHECK_MS = 30 * 1000;
+const RESPAWN_BUFF_MS = 10 * 1000;
+const EFFECT_MS = 15 * 1000;
 
 const round1 = (n) => Math.round(n * 10) / 10;
 
@@ -65,6 +76,15 @@ const resourceTypes = [
 ];
 
 const LOGO_COUNT = 12;
+
+const spItemTypes = [
+  { type: 'innovation', label: 'Doi moi cong nghe', rarity: 'common', weight: 30, color: '#2dd4bf', icon: 'x2', effect: { kind: 'resourceBoost', durationMs: EFFECT_MS } },
+  { type: 'distribution', label: 'Mo rong phan phoi', rarity: 'common', weight: 25, color: '#60a5fa', icon: '>>', effect: { kind: 'speedBoost', durationMs: EFFECT_MS, multiplier: 1.25 } },
+  { type: 'shield', label: 'Khien bao ho', rarity: 'uncommon', weight: 20, color: '#a78bfa', icon: 'SH', effect: { kind: 'shield', durationMs: EFFECT_MS } },
+  { type: 'credit', label: 'Von vay uu dai', rarity: 'rare', weight: 12, color: '#facc15', icon: '+%', effect: { kind: 'scorePercent' } },
+  { type: 'crisis', label: 'Khung hoang kinh te', rarity: 'rare', weight: 8, color: '#fb7185', icon: '-%', effect: { kind: 'scoreLoss' } },
+  { type: 'antitrust', label: 'Luat chong doc quyen', rarity: 'legendary', weight: 5, color: '#f97316', icon: 'LAW', effect: { kind: 'antitrust' } },
+];
 
 const palette = [
   '#FDE68A', '#93C5FD', '#86EFAC', '#FCA5A5', '#C4B5FD', '#67E8F9',
@@ -87,12 +107,18 @@ function createGame(opts = {}) {
     phaseName: 'Cạnh tranh tự do',
     running: false,
     gameStarted: false,
+    gameEnded: false,
     startedAt: null,
-    sessionDurationMs: 5 * 60 * 1000,
+    sessionDurationMs: MATCH_DURATION_MS,
     customJoinUrl: opts.customJoinUrl || null,
     players: {},
     resources: [],
     ejected: [],
+    spItems: [],
+    pointBags: [],
+    lastSpDropAt: 0,
+    topLeaderId: null,
+    topLeaderSince: 0,
     infrastructures: [
       { id: 'grid', type: 'electricity', label: 'Lưới điện', x: WORLD.width * 0.34, y: WORLD.height * 0.5, radius: 110, ownerId: null, capturedAt: null, color: '#facc15' },
       { id: 'pipe', type: 'water', label: 'Đường ống nước', x: WORLD.width * 0.66, y: WORLD.height * 0.5, radius: 110, ownerId: null, capturedAt: null, color: '#38bdf8' },
@@ -141,6 +167,92 @@ function getJoinUrl(g) {
   return `${base}/player`;
 }
 
+function randomInt(min, max) {
+  return Math.floor(min + Math.random() * (max - min + 1));
+}
+
+function randomTtl(minMs, maxMs) {
+  return randomInt(minMs, maxMs);
+}
+
+function elapsedMs() {
+  return game.gameStarted && game.startedAt ? Date.now() - game.startedAt : 0;
+}
+
+function phaseForElapsed(ms) {
+  if (ms < 2 * 60 * 1000) return { phase: 1, name: 'Canh tranh tu do' };
+  if (ms < 7 * 60 * 1000) return { phase: 2, name: 'Tich tu tu ban' };
+  if (ms < 12 * 60 * 1000) return { phase: 3, name: 'Doc quyen' };
+  if (ms < 13 * 60 * 1000) return { phase: 4, name: 'Chuyen tiep dieu tiet' };
+  return { phase: 5, name: 'Doc quyen nha nuoc' };
+}
+
+function updatePhaseByTime() {
+  if (!game.gameStarted) return;
+  const next = phaseForElapsed(elapsedMs());
+  if (game.phase !== next.phase) {
+    game.phase = next.phase;
+    game.phaseName = next.name;
+    if (game.phase === 5) game.votes = {};
+    addEvent(`Giai doan ${game.phase}: ${game.phaseName}`, 'phase');
+  }
+}
+
+function activeUntil(p, key, now = Date.now()) {
+  return Number(p.effects?.[key] || 0) > now;
+}
+
+function setTimedEffect(p, key, durationMs, now = Date.now()) {
+  if (!p.effects) p.effects = {};
+  p.effects[key] = now + durationMs;
+}
+
+function clearExpiredEffects(p, now = Date.now()) {
+  if (!p.effects) p.effects = {};
+  for (const key of Object.keys(p.effects)) {
+    if (key.endsWith('Until') && p.effects[key] <= now) p.effects[key] = 0;
+  }
+}
+
+function scoreRankings() {
+  return Object.values(game.players)
+    .filter(p => p.alive)
+    .sort((a, b) => (b.score - a.score) || (totalMass(b) - totalMass(a)));
+}
+
+function topPlayer() {
+  return scoreRankings()[0] || null;
+}
+
+function topThreeIds() {
+  return new Set(scoreRankings().slice(0, 3).map(p => p.id));
+}
+
+function scoreBase(p) {
+  return Math.max(1, p.score || 0);
+}
+
+function addScore(p, amount) {
+  p.score = Math.max(0, (p.score || 0) + amount);
+}
+
+function subtractScorePercent(p, percent, redistribute = false) {
+  const amount = round1(scoreBase(p) * percent);
+  if (amount <= 0) return 0;
+  addScore(p, -amount);
+  if (redistribute) spawnPointBags(amount);
+  return amount;
+}
+
+function notifyPlayer(playerId, message, kind = 'info') {
+  io.to(playerId).emit('notice', { message, kind, at: Date.now(), scope: 'personal' });
+}
+
+function notifyAll(message, kind = 'info') {
+  io.emit('notice', { message, kind, at: Date.now(), scope: 'global' });
+  addEvent(message, kind);
+}
+
 function chooseResourceType() {
   const total = resourceTypes.reduce((s, r) => s + r.weight, 0);
   let roll = Math.random() * total;
@@ -169,6 +281,100 @@ function newResource(id = `${Date.now()}-${Math.random()}`) {
   };
 }
 
+function randomMapPosition(margin = 80) {
+  return {
+    x: margin + Math.random() * (WORLD.width - margin * 2),
+    y: margin + Math.random() * (WORLD.height - margin * 2),
+  };
+}
+
+function chooseSpItemType(allowAntitrust, antitrustAlreadyPicked = false) {
+  let pool = spItemTypes;
+  if (!allowAntitrust || antitrustAlreadyPicked) {
+    pool = spItemTypes.filter(i => i.type !== 'antitrust');
+  }
+  const total = pool.reduce((s, i) => s + i.weight, 0);
+  let roll = Math.random() * total;
+  for (const item of pool) {
+    roll -= item.weight;
+    if (roll <= 0) return item;
+  }
+  return pool[0];
+}
+
+function makeSpItem(def, now = Date.now()) {
+  const ttl = randomTtl(SP_ITEM_MIN_TTL_MS, SP_ITEM_MAX_TTL_MS);
+  const position = randomMapPosition();
+  return {
+    id: `sp-${now}-${Math.random()}`,
+    type: def.type,
+    label: def.label,
+    position,
+    x: position.x,
+    y: position.y,
+    radius: 22,
+    duration: ttl,
+    rarity: def.rarity,
+    effect: def.effect,
+    icon: def.icon,
+    color: def.color,
+    spawnTime: now,
+    expireTime: now + ttl,
+  };
+}
+
+function dropSpItems() {
+  const now = Date.now();
+  if (now - game.lastSpDropAt < SP_DROP_COOLDOWN_MS) return false;
+
+  const playerCount = Object.keys(game.players).length;
+  const count = playerCount <= 8 ? randomInt(8, 12) : randomInt(15, 20);
+  const allowAntitrust = elapsedMs() >= AUTO_MONOPOLY_START_MS;
+  let hasAntitrust = false;
+  const items = [];
+
+  for (let i = 0; i < count; i++) {
+    const def = chooseSpItemType(allowAntitrust, hasAntitrust);
+    if (def.type === 'antitrust') hasAntitrust = true;
+    items.push(makeSpItem(def, now));
+  }
+
+  game.spItems.push(...items);
+  game.lastSpDropAt = now;
+  notifyAll(`Drop SP Item: ${items.length} item da roi tren map`, 'phase');
+  return true;
+}
+
+function spawnPointBags(totalValue) {
+  if (totalValue <= 0) return;
+  const now = Date.now();
+  const count = randomInt(5, 12);
+  const weights = Array.from({ length: count }, () => 0.25 + Math.random());
+  const sum = weights.reduce((s, w) => s + w, 0);
+  let allocated = 0;
+  const bags = weights.map((w, idx) => {
+    const value = idx === weights.length - 1 ? totalValue - allocated : totalValue * (w / sum);
+    allocated += value;
+    const ttl = randomTtl(POINT_BAG_MIN_TTL_MS, POINT_BAG_MAX_TTL_MS);
+    const position = randomMapPosition();
+    return {
+      id: `bag-${now}-${idx}-${Math.random()}`,
+      type: 'pointBag',
+      label: 'Tui diem dieu tiet',
+      position,
+      x: position.x,
+      y: position.y,
+      radius: 18,
+      value: Math.max(0, value),
+      duration: ttl,
+      spawnTime: now,
+      expireTime: now + ttl,
+      color: '#fbbf24',
+    };
+  }).filter(b => b.value > 0);
+  game.pointBags.push(...bags);
+}
+
 function radiusFromMass(mass) {
   const growth = Math.max(0, Math.sqrt(mass) - Math.sqrt(PLAYER_START_MASS));
   return PLAYER_START_RADIUS + growth * RADIUS_GROWTH_SCALE;
@@ -182,9 +388,21 @@ function ogarSize(mass) {
   return Math.max(1, Math.floor(Math.sqrt(100 * mass)));
 }
 
-function cellMoveSpeed(mass) {
+function speedMultiplier(p, now = Date.now()) {
+  let mult = 1;
+  if (activeUntil(p, 'speedBoostUntil', now)) mult *= p.effects?.speedBoostMult || 1.25;
+  if (activeUntil(p, 'monopolySlowUntil', now)) mult *= 0.8;
+  if (p.monopolySupervised) mult *= 0.9;
+  return mult;
+}
+
+function resourceMultiplier(p, now = Date.now()) {
+  return activeUntil(p, 'resourceBoostUntil', now) ? 2 : 1;
+}
+
+function cellMoveSpeed(mass, p) {
   const size = ogarSize(mass);
-  return (PLAYER_SPEED * 1.6 / Math.pow(size, 0.32)) * TICK_SCALE;
+  return (PLAYER_SPEED * 1.6 / Math.pow(size, 0.32)) * TICK_SCALE * speedMultiplier(p);
 }
 
 function calcMergeAt(mass, now) {
@@ -198,7 +416,7 @@ function cellAngleToMouse(cell, p) {
 }
 
 function moveCellTowardMouse(cell, p) {
-  const speed = cellMoveSpeed(cell.mass);
+  const speed = cellMoveSpeed(cell.mass, p);
   const dx = p.mouseX - cell.x;
   const dy = p.mouseY - cell.y;
   const dist = Math.hypot(dx, dy);
@@ -293,7 +511,7 @@ function createPlayer(socketId, name, logoIndex = 0) {
     dirY: 0,
     lastDirX: 1,
     lastDirY: 0,
-    score: 0,
+    score: PLAYER_START_MASS,
     swallowed: 0,
     swallowedBy: 0,
     color: palette[index % palette.length],
@@ -302,6 +520,16 @@ function createPlayer(socketId, name, logoIndex = 0) {
     joinedAt: Date.now(),
     lastSplitAt: 0,
     lastEjectAt: 0,
+    effects: {
+      resourceBoostUntil: 0,
+      shieldUntil: 0,
+      speedBoostUntil: 0,
+      speedBoostMult: 1,
+      monopolySlowUntil: 0,
+      noSwallowUntil: 0,
+    },
+    monopolySupervised: false,
+    monopolyPenaltyDueAt: 0,
   };
   syncLegacyFields(p);
   return p;
@@ -391,10 +619,13 @@ function killPlayer(p) {
   p.alive = false;
   p.cells = [];
   p.respawnAt = Date.now() + 4200;
+  p.monopolySupervised = false;
+  p.monopolyPenaltyDueAt = 0;
   syncLegacyFields(p);
 }
 
 function respawnPlayer(p) {
+  const now = Date.now();
   const spawn = randomSpawn();
   p.cells = [makeCell(p.id, spawn.x, spawn.y, PLAYER_START_MASS)];
   p.mouseX = spawn.x;
@@ -402,6 +633,11 @@ function respawnPlayer(p) {
   p.alive = true;
   p.dirX = 0;
   p.dirY = 0;
+  setTimedEffect(p, 'shieldUntil', RESPAWN_BUFF_MS, now);
+  setTimedEffect(p, 'resourceBoostUntil', RESPAWN_BUFF_MS, now);
+  setTimedEffect(p, 'speedBoostUntil', RESPAWN_BUFF_MS, now);
+  p.effects.speedBoostMult = 1.2;
+  notifyPlayer(p.id, 'Hoi sinh: khien 10s, tang toc 20%, x2 diem tai nguyen', 'success');
   syncLegacyFields(p);
 }
 
@@ -453,10 +689,105 @@ function collectResources(p) {
       const r = game.resources[i];
       const d = Math.hypot(cell.x - r.x, cell.y - r.y);
       if (d < cr + resourceHitRadius(r)) {
-        cell.mass += r.value * RESOURCE_MASS_GAIN;
-        p.score += r.value;
+        const mult = resourceMultiplier(p);
+        cell.mass += r.value * RESOURCE_MASS_GAIN * mult;
+        p.score += r.value * mult;
         game.resources.splice(i, 1);
         game.resources.push(newResource());
+      }
+    }
+  }
+  syncLegacyFields(p);
+}
+
+function applySpItem(p, item) {
+  const now = Date.now();
+  if (item.type === 'innovation') {
+    setTimedEffect(p, 'resourceBoostUntil', EFFECT_MS, now);
+    notifyPlayer(p.id, 'Doi moi cong nghe: x2 diem/tang truong tai nguyen trong 15s', 'success');
+    return;
+  }
+
+  if (item.type === 'distribution') {
+    setTimedEffect(p, 'speedBoostUntil', EFFECT_MS, now);
+    p.effects.speedBoostMult = 1.25;
+    notifyPlayer(p.id, 'Mo rong phan phoi: +25% toc do trong 15s', 'success');
+    return;
+  }
+
+  if (item.type === 'shield') {
+    setTimedEffect(p, 'shieldUntil', EFFECT_MS, now);
+    notifyPlayer(p.id, 'Khien bao ho: khong bi thau tom trong 15s', 'success');
+    return;
+  }
+
+  if (item.type === 'credit') {
+    const top3 = topThreeIds();
+    const percent = top3.has(p.id) ? 0.05 : 0.1;
+    const amount = round1(scoreBase(p) * percent);
+    addScore(p, amount);
+    notifyPlayer(p.id, `Von vay uu dai: +${Math.round(percent * 100)}% diem (+${amount})`, 'success');
+    return;
+  }
+
+  if (item.type === 'crisis') {
+    const amount = subtractScorePercent(p, 0.1, false);
+    notifyPlayer(p.id, `Khung hoang kinh te: mat 10% diem (-${amount})`, 'warn');
+    return;
+  }
+
+  if (item.type === 'antitrust') {
+    applyAntitrustItem(p);
+  }
+}
+
+function applyAntitrustItem(collector) {
+  const target = topPlayer();
+  if (!target) return;
+  const roll = randomInt(1, 3);
+  let detail = '';
+
+  if (roll === 1) {
+    const amount = subtractScorePercent(target, 0.1, true);
+    detail = `${target.name} mat 10% diem (-${amount}), diem bi chia thanh tui tren map`;
+  } else if (roll === 2) {
+    setTimedEffect(target, 'monopolySlowUntil', EFFECT_MS);
+    detail = `${target.name} bi giam toc 20% trong 15s`;
+    notifyPlayer(target.id, 'Luat chong doc quyen: ban bi giam toc 20% trong 15s', 'warn');
+  } else {
+    setTimedEffect(target, 'noSwallowUntil', EFFECT_MS);
+    detail = `${target.name} khong duoc thau tom nguoi khac trong 15s`;
+    notifyPlayer(target.id, 'Luat chong doc quyen: tam thoi khong duoc thau tom trong 15s', 'warn');
+  }
+
+  notifyAll(`Luat chong doc quyen duoc ${collector.name} kich hoat: ${detail}`, 'danger');
+}
+
+function collectSpItems(p) {
+  for (const cell of p.cells) {
+    const cr = radiusFromMass(cell.mass);
+    for (let i = game.spItems.length - 1; i >= 0; i--) {
+      const item = game.spItems[i];
+      const d = Math.hypot(cell.x - item.x, cell.y - item.y);
+      if (d < cr + item.radius) {
+        game.spItems.splice(i, 1);
+        applySpItem(p, item);
+      }
+    }
+  }
+}
+
+function collectPointBags(p) {
+  for (const cell of p.cells) {
+    const cr = radiusFromMass(cell.mass);
+    for (let i = game.pointBags.length - 1; i >= 0; i--) {
+      const bag = game.pointBags[i];
+      const d = Math.hypot(cell.x - bag.x, cell.y - bag.y);
+      if (d < cr + bag.radius) {
+        addScore(p, bag.value);
+        cell.mass += Math.max(1, bag.value * 0.25);
+        game.pointBags.splice(i, 1);
+        notifyPlayer(p.id, `Nhan tui diem dieu tiet: +${round1(bag.value)} diem`, 'success');
       }
     }
   }
@@ -538,6 +869,8 @@ function handleEjectedCollisions() {
 }
 
 function handleSwallowing() {
+  if (game.gameStarted && elapsedMs() < 2 * 60 * 1000) return;
+
   const alive = Object.values(game.players).filter(p => p.alive && p.cells.length);
   const allCells = [];
   for (const p of alive) {
@@ -566,6 +899,9 @@ function handleSwallowing() {
         bigCell = b; smallCell = a; bigPlayer = pb; smallPlayer = pa;
       }
       if (!bigCell) continue;
+      const now = Date.now();
+      if (activeUntil(smallPlayer, 'shieldUntil', now)) continue;
+      if (activeUntil(bigPlayer, 'noSwallowUntil', now)) continue;
 
       bigCell.mass += smallCell.mass * SWALLOW_MASS_TRANSFER;
       smallPlayer.cells = smallPlayer.cells.filter(c => c.id !== smallCell.id);
@@ -589,6 +925,7 @@ function handleSwallowing() {
 
 function updatePlayer(p) {
   if (!game.gameStarted || !game.running) return;
+  clearExpiredEffects(p);
   if (!p.alive) {
     if (Date.now() > p.respawnAt) respawnPlayer(p);
     return;
@@ -600,21 +937,94 @@ function updatePlayer(p) {
 
   updateCells(p);
   collectResources(p);
+  collectSpItems(p);
+  collectPointBags(p);
   handleInfra(p);
   mergeCells(p);
 }
 
 function nextPhase() {
-  if (game.phase < 3) game.phase += 1;
+  if (game.phase < 5) game.phase += 1;
   else game.phase = 1;
   const names = {
     1: 'Cạnh tranh tự do',
     2: 'Độc quyền hạ tầng điện/nước',
     3: 'Chính sách: Bán hay không bán?',
   };
+  names[4] = 'Chuyen tiep dieu tiet';
+  names[5] = 'Doc quyen nha nuoc';
   game.phaseName = names[game.phase];
-  if (game.phase === 3) game.votes = {};
+  if (game.phase === 5) game.votes = {};
   addEvent(`Chuyển sang giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
+}
+
+function updateTemporaryObjects() {
+  const now = Date.now();
+  game.spItems = game.spItems.filter(item => item.expireTime > now);
+  game.pointBags = game.pointBags.filter(bag => bag.expireTime > now);
+}
+
+function updateAutoMonopoly() {
+  if (!game.gameStarted || !game.running) return;
+  const now = Date.now();
+  if (elapsedMs() < AUTO_MONOPOLY_START_MS) {
+    game.topLeaderId = null;
+    game.topLeaderSince = 0;
+    for (const p of Object.values(game.players)) {
+      p.monopolySupervised = false;
+      p.monopolyPenaltyDueAt = 0;
+    }
+    return;
+  }
+
+  const top = topPlayer();
+  if (!top) return;
+
+  if (game.topLeaderId !== top.id) {
+    for (const p of Object.values(game.players)) {
+      if (p.id !== top.id && p.monopolySupervised) {
+        p.monopolySupervised = false;
+        p.monopolyPenaltyDueAt = 0;
+        notifyPlayer(p.id, 'Da thoat trang thai giam sat doc quyen', 'success');
+        addEvent(`${p.name} khong con la top 1, go giam sat doc quyen`, 'info');
+      }
+    }
+    game.topLeaderId = top.id;
+    game.topLeaderSince = now;
+    return;
+  }
+
+  for (const p of Object.values(game.players)) {
+    if (p.id !== top.id && p.monopolySupervised) {
+      p.monopolySupervised = false;
+      p.monopolyPenaltyDueAt = 0;
+      notifyPlayer(p.id, 'Da thoat trang thai giam sat doc quyen', 'success');
+    }
+  }
+
+  if (!top.monopolySupervised && now - game.topLeaderSince >= AUTO_MONOPOLY_HOLD_MS) {
+    top.monopolySupervised = true;
+    top.monopolyPenaltyDueAt = now + AUTO_MONOPOLY_CHECK_MS;
+    notifyPlayer(top.id, 'Ban dang bi giam sat doc quyen: -10% toc do, kiem tra moi 30s', 'warn');
+    notifyAll(`${top.name} giu top 1 qua 30s va bi giam sat doc quyen`, 'danger');
+    return;
+  }
+
+  if (top.monopolySupervised && now >= top.monopolyPenaltyDueAt) {
+    const amount = subtractScorePercent(top, 0.05, true);
+    top.monopolyPenaltyDueAt = now + AUTO_MONOPOLY_CHECK_MS;
+    notifyPlayer(top.id, `Bi phat doc quyen: -5% diem (-${amount})`, 'warn');
+    notifyAll(`${top.name} bi tru 5% diem do duy tri vi the doc quyen`, 'danger');
+  }
+}
+
+function endMatchIfNeeded() {
+  if (!game.gameStarted || game.gameEnded) return;
+  if (elapsedMs() < game.sessionDurationMs) return;
+  game.running = false;
+  game.gameEnded = true;
+  const winner = scoreRankings()[0];
+  notifyAll(winner ? `Het gio! Nguoi thang: ${winner.name} voi ${Math.round(winner.score)} diem` : 'Het gio! Chua co nguoi thang', 'phase');
 }
 
 function updateMetrics() {
@@ -669,6 +1079,8 @@ function serializePlayer(p) {
     color: p.color,
     logoIndex: p.logoIndex,
     alive: p.alive,
+    monopolySupervised: !!p.monopolySupervised,
+    shieldActive: activeUntil(p, 'shieldUntil'),
     cells: p.cells.map(c => ({
       id: c.id,
       x: Math.round(c.x),
@@ -679,12 +1091,34 @@ function serializePlayer(p) {
   };
 }
 
+function personalState(p) {
+  const now = Date.now();
+  const effects = [];
+  const push = (key, label, until) => {
+    const remainingMs = Math.max(0, until - now);
+    if (remainingMs > 0) effects.push({ key, label, remainingMs });
+  };
+  push('resourceBoost', 'x2 tai nguyen', p.effects?.resourceBoostUntil || 0);
+  push('shield', 'Khien bao ho', p.effects?.shieldUntil || 0);
+  push('speedBoost', 'Tang toc', p.effects?.speedBoostUntil || 0);
+  push('monopolySlow', 'Giam toc doc quyen', p.effects?.monopolySlowUntil || 0);
+  push('noSwallow', 'Cam thau tom', p.effects?.noSwallowUntil || 0);
+  if (p.monopolySupervised) {
+    effects.push({
+      key: 'supervised',
+      label: 'Bi giam sat doc quyen',
+      remainingMs: Math.max(0, (p.monopolyPenaltyDueAt || now) - now),
+    });
+  }
+  return { effects, monopolySupervised: !!p.monopolySupervised };
+}
+
 function publicState(includeResources = true) {
   const players = Object.values(game.players).map(serializePlayer);
 
   const leaderboard = players
     .slice()
-    .sort((a, b) => b.mass - a.mass)
+    .sort((a, b) => b.score - a.score)
     .slice(0, 10)
     .map((p, idx) => ({
       rank: idx + 1,
@@ -725,12 +1159,44 @@ function publicState(includeResources = true) {
     phaseName: game.phaseName,
     running: game.running,
     gameStarted: game.gameStarted,
+    gameEnded: game.gameEnded,
     elapsedMs,
     remainingMs,
     sessionDurationMs: game.sessionDurationMs,
     joinUrl: getJoinUrl(game),
     players,
     ejected,
+    spItems: game.spItems.map(item => ({
+      id: item.id,
+      type: item.type,
+      label: item.label,
+      x: Math.round(item.x),
+      y: Math.round(item.y),
+      position: { x: Math.round(item.x), y: Math.round(item.y) },
+      radius: item.radius,
+      rarity: item.rarity,
+      effect: item.effect,
+      duration: item.duration,
+      spawnTime: item.spawnTime,
+      expireTime: item.expireTime,
+      color: item.color,
+      icon: item.icon,
+    })),
+    pointBags: game.pointBags.map(bag => ({
+      id: bag.id,
+      type: bag.type,
+      label: bag.label,
+      x: Math.round(bag.x),
+      y: Math.round(bag.y),
+      position: { x: Math.round(bag.x), y: Math.round(bag.y) },
+      radius: bag.radius,
+      value: round1(bag.value),
+      duration: bag.duration,
+      spawnTime: bag.spawnTime,
+      expireTime: bag.expireTime,
+      color: bag.color,
+    })),
+    spDropCooldownMs: Math.max(0, SP_DROP_COOLDOWN_MS - (Date.now() - game.lastSpDropAt)),
     infrastructures: game.infrastructures.map(i => ({ ...i, ownerName: i.ownerId && game.players[i.ownerId] ? game.players[i.ownerId].name : null })),
     leaderboard,
     events: game.events,
@@ -812,6 +1278,7 @@ io.on('connection', (socket) => {
       if (!game.gameStarted) {
         game.gameStarted = true;
         game.running = true;
+        game.gameEnded = false;
         game.startedAt = Date.now();
         game.resources = generateResources();
         game.ejected = [];
@@ -819,6 +1286,11 @@ io.on('connection', (socket) => {
       }
     }
     if (action === 'nextPhase') nextPhase();
+    if (action === 'dropSpItems') {
+      if (!game.gameStarted || game.gameEnded) return;
+      const ok = dropSpItems();
+      if (!ok) socket.emit('notice', { message: 'Drop SP Item dang cooldown', kind: 'warn', at: Date.now(), scope: 'host' });
+    }
     if (action === 'pause') {
       if (!game.gameStarted) return;
       game.running = !game.running;
@@ -851,14 +1323,21 @@ io.on('connection', (socket) => {
 let tickCount = 0;
 setInterval(() => {
   if (game.running && game.gameStarted) {
+    updatePhaseByTime();
     for (const p of Object.values(game.players)) updatePlayer(p);
     updateEjected();
+    updateTemporaryObjects();
     handleEjectedCollisions();
     handleSwallowing();
+    updateAutoMonopoly();
     updateMetrics();
+    endMatchIfNeeded();
   }
   tickCount++;
   io.emit('state', publicState(tickCount % RESOURCE_SYNC_EVERY === 0));
+  for (const p of Object.values(game.players)) {
+    io.to(p.id).emit('personalState', personalState(p));
+  }
 }, 1000 / TICK_RATE);
 
 server.listen(PORT, '0.0.0.0', () => {
