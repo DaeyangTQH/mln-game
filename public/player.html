@@ -8,7 +8,9 @@
 </head>
 <body>
   <main class="player-page">
-    <section class="panel player-card" id="joinCard">
+    <section class="onboarding-shell" id="onboarding">
+    <section class="panel player-card" id="join-card">
+      <div class="join-card-glow"></div>
       <div class="kicker">Monopoly Market Arena</div>
       <h1>Nuốt Thị Trường</h1>
       <p>Bạn là một doanh nghiệp nhỏ. Hãy thu thập vốn, công nghệ, khách hàng để lớn lên. Khi đủ lớn, bạn có thể thâu tóm doanh nghiệp nhỏ hơn.</p>
@@ -17,6 +19,98 @@
       <div class="logo-picker" id="logoPicker"></div>
       <button id="joinBtn" style="width:100%">Gia nhập thị trường</button>
       <p class="small" style="margin-top:12px">Gợi ý tên: Tổng tài Aqua, Điện Sấm Sét, Nước Đại Phát, Market Boss...</p>
+    </section>
+
+    <aside class="quick-guide" aria-label="Hướng dẫn nhanh">
+      <section class="guide-card victory-card">
+        <div class="guide-title-row">
+          <div>
+            <div class="guide-eyebrow">Quick Start</div>
+            <h2>Mục tiêu chiến thắng</h2>
+          </div>
+          <span class="guide-badge">15s để hiểu game</span>
+        </div>
+        <div class="win-flow">
+          <div class="flow-step"><span class="flow-icon resource-pulse"><i class="sprite-chip" data-sheet="icons" data-idx="0"></i></span><strong>Thu thập</strong><small>Ăn các điểm sáng trên bản đồ</small></div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-step"><span class="flow-icon"><i class="sprite-chip" data-sheet="policy" data-idx="13"></i></span><strong>Tăng quy mô</strong><small>Càng nhiều điểm càng to</small></div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-step"><span class="flow-icon"><i class="sprite-chip" data-sheet="logos" data-idx="6"></i></span><strong>Thâu tóm</strong><small>To hơn rõ rệt mới nuốt được</small></div>
+          <span class="flow-arrow">→</span>
+          <div class="flow-step winner"><span class="flow-icon"><i class="sprite-chip" data-sheet="policy" data-idx="3"></i></span><strong>Dẫn đầu</strong><small>Hết giờ ai nhiều điểm nhất thắng</small></div>
+        </div>
+        <div class="quick-rule-strip">
+          <span>Thâu tóm = doanh nghiệp lớn đụng vào doanh nghiệp nhỏ hơn để “nuốt” và loại họ tạm thời.</span>
+          <span>2 phút đầu chưa được nuốt nhau. Bị loại sẽ hồi sinh sau vài giây và có buff comeback.</span>
+        </div>
+      </section>
+
+      <div class="guide-grid">
+        <section class="guide-card controls-card">
+          <div class="guide-card-head"><h3>Điều khiển</h3><span class="mini-badge blue">Desktop</span></div>
+          <div class="control-lanes">
+            <div class="control-lane">
+              <div class="lane-label">Desktop</div>
+              <p class="lane-help">Đi chuột tới đâu, doanh nghiệp sẽ chạy về hướng đó.</p>
+              <div class="control-icons">
+                <div class="control-chip"><span class="control-glyph mouse-glyph"><i></i></span><b>Di chuyển</b><small>Đưa chuột về hướng muốn chạy</small></div>
+                <div class="control-chip key-chip"><span class="control-glyph key-glyph">Space</span><b>Tách</b><small>Chia doanh nghiệp để lao nhanh hơn</small></div>
+                <div class="control-chip key-chip"><span class="control-glyph key-glyph">W</span><b>Bắn vốn</b><small>Hy sinh ít quy mô để bắn vốn ra ngoài</small></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="guide-card resources-card">
+          <div class="guide-card-head"><h3>Tài nguyên</h3><span class="mini-badge green">Farm để lớn</span></div>
+          <div class="resource-grid">
+            <div class="resource-card capital"><span class="sprite-chip resource-guide-icon" data-sheet="icons" data-idx="0"></span><b>Capital</b><small>Ăn để tăng điểm và vốn</small></div>
+            <div class="resource-card tech"><span class="sprite-chip resource-guide-icon" data-sheet="icons" data-idx="2"></span><b>Technology</b><small>Giúp doanh nghiệp tăng trưởng nhanh</small></div>
+            <div class="resource-card customer"><span class="sprite-chip resource-guide-icon" data-sheet="icons" data-idx="4"></span><b>Customer</b><small>Tượng trưng cho thị phần khách hàng</small></div>
+            <div class="resource-card license"><span class="sprite-chip resource-guide-icon" data-sheet="icons" data-idx="6"></span><b>License</b><small>Hiếm hơn, giá trị cao hơn</small></div>
+          </div>
+        </section>
+      </div>
+
+      <section class="guide-card items-card">
+        <div class="guide-card-head"><h3>SP Item</h3><span class="mini-badge purple">Nhặt để lật kèo</span></div>
+        <p class="guide-hint">SP Item là vật phẩm đặc biệt rơi trên bản đồ. Chạm vào là kích hoạt ngay: có item cứu bạn, có item tăng tốc, cũng có item gây rủi ro.</p>
+        <div class="item-grid">
+          <div class="item-chip shield"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="8"></span><b>Shield</b><small>Tạm thời không bị nuốt</small></div>
+          <div class="item-chip speed"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="11"></span><b>Speed</b><small>Chạy nhanh hơn để săn/né</small></div>
+          <div class="item-chip boost"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="13"></span><b>x2</b><small>Ăn tài nguyên được nhiều điểm hơn</small></div>
+          <div class="item-chip loan"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="14"></span><b>Loan</b><small>Vay vốn, cộng điểm ngay</small></div>
+          <div class="item-chip crisis"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="2"></span><b>Crisis</b><small>Rủi ro: bị mất điểm</small></div>
+          <div class="item-chip law"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="15"></span><b>Anti Monopoly</b><small>Đánh vào người đang Top 1</small></div>
+        </div>
+      </section>
+
+      <div class="guide-bottom">
+        <section class="guide-card remember-card">
+          <div class="guide-card-head"><h3>Điều cần nhớ</h3></div>
+          <p class="guide-hint">Game không chỉ là chạy ăn điểm: càng lớn bạn càng mạnh, nhưng cũng dễ bị cả hệ thống điều tiết.</p>
+          <ul class="remember-list">
+            <li><span>✓</span>Ăn tài nguyên để tăng điểm, tăng kích thước và mở rộng thị phần.</li>
+            <li><span>2</span>Phase 2 mới được tấn công/nuốt người khác; 2 phút đầu chỉ farm.</li>
+            <li><span>↯</span>Muốn nuốt đối thủ, bạn phải lớn hơn họ rõ rệt và chạm vào họ.</li>
+            <li><span>⚖</span>Nếu giữ Top 1 quá lâu, Nhà nước sẽ điều tiết để giảm snowball.</li>
+            <li><span>↻</span>Bị loại không hết game: bạn hồi sinh và có khiên/tăng tốc/x2 tài nguyên.</li>
+          </ul>
+        </section>
+
+        <section class="guide-card timeline-card">
+          <div class="guide-card-head"><h3>Timeline trận đấu</h3></div>
+          <p class="guide-hint">Trận đấu càng về sau càng nhiều luật chống snowball, giúp người yếu có cơ hội quay lại.</p>
+          <div class="phase-timeline">
+            <div class="phase-node active"><span class="sprite-chip quick-icon" data-sheet="icons" data-idx="0"></span><b>Cạnh tranh</b><small>Farm an toàn</small></div>
+            <div class="phase-node"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="13"></span><b>Tích tụ</b><small>Bắt đầu nuốt nhau</small></div>
+            <div class="phase-node"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="3"></span><b>Độc quyền</b><small>Theo dõi Top 1</small></div>
+            <div class="phase-node"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="15"></span><b>Điều tiết</b><small>Phạt người quá mạnh</small></div>
+            <div class="phase-node"><span class="sprite-chip quick-icon" data-sheet="policy" data-idx="9"></span><b>Nhà nước</b><small>Vote chính sách</small></div>
+          </div>
+        </section>
+      </div>
+    </aside>
     </section>
 
     <section class="player-hud hide" id="hud">
@@ -78,7 +172,7 @@
     let lastFrameTs = 0;
     let currentVote = null;
     let selectedLogo = 0;
-    const joinCard = document.getElementById('joinCard');
+    const onboarding = document.getElementById('onboarding');
     const hud = document.getElementById('hud');
     const joystick = document.getElementById('joystick');
     const knob = document.getElementById('knob');
@@ -130,7 +224,7 @@
     socket.on('joined', ({ id, player }) => {
       myId = id;
       document.body.classList.add('player-playing');
-      joinCard.classList.add('hide');
+      onboarding.classList.add('hide');
       hud.classList.remove('hide');
       document.getElementById('playerName').textContent = player.name;
       if (document.activeElement) document.activeElement.blur();

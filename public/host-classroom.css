@@ -20,7 +20,11 @@ body.host-classroom {
   margin: 0;
   color: var(--hc-text);
   background: var(--hc-bg);
-  font-family: "Segoe UI", Inter, ui-sans-serif, system-ui, sans-serif;
+  font-family: Arial, Tahoma, "Segoe UI", system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.45;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
@@ -84,7 +88,7 @@ body.host-classroom {
 }
 .host-classroom .hc-brand {
   font-size: 20px;
-  font-weight: 900;
+  font-weight: 800;
   white-space: nowrap;
 }
 .host-classroom .hc-divider {
@@ -100,7 +104,7 @@ body.host-classroom {
 .host-classroom .hc-stat .label { opacity: .8; font-weight: 600; }
 .host-classroom .hc-timer {
   font-size: 22px;
-  font-weight: 900;
+  font-weight: 850;
   font-variant-numeric: tabular-nums;
   min-width: 64px;
   text-align: center;
@@ -264,9 +268,9 @@ body.host-classroom {
 }
 .host-classroom .hc-card-title {
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: .1em;
+  letter-spacing: .06em;
   color: var(--hc-text-muted);
   margin: 0 0 10px;
 }
@@ -285,13 +289,13 @@ body.host-classroom {
 .host-classroom .hc-metric .m-label {
   font-size: 11px;
   color: var(--hc-text-muted);
-  font-weight: 700;
+  font-weight: 650;
   text-transform: uppercase;
-  letter-spacing: .04em;
+  letter-spacing: .02em;
 }
 .host-classroom .hc-metric .m-value {
   font-size: 20px;
-  font-weight: 900;
+  font-weight: 850;
   margin-top: 2px;
   line-height: 1.2;
 }

@@ -32,7 +32,7 @@
       <div class="hc-actions">
         <button type="button" class="btn-primary btn-md" id="startGame">Bắt đầu game</button>
         <button type="button" class="btn-primary btn-md" id="nextPhase">Chuyển giai đoạn</button>
-        <button type="button" class="btn-primary btn-md" id="dropSpItem">Drop SP Item</button>
+        <button type="button" class="btn-primary btn-md" id="dropSpItem">Thả SP Item</button>
         <button type="button" class="btn-secondary btn-sm" id="pause">Tạm dừng</button>
         <button type="button" class="btn-warn btn-sm" id="reset">Chơi lại</button>
         <div class="hc-settings">
@@ -192,7 +192,7 @@
       cards: [
         { title: 'Top 1', sub: 'Doanh nghiệp chi phối', sheet: 'policy', index: 14 },
         { title: 'Giám sát', sub: 'Giảm tốc và kiểm tra 30s', sheet: 'policy', index: 6 },
-        { title: 'Túi điểm', sub: 'Điểm phạt rơi lại map', sheet: 'icons', index: 0 },
+        { title: 'Túi điểm', sub: 'Điểm phạt rơi lại bản đồ', sheet: 'icons', index: 0 },
       ],
     };
 
@@ -561,7 +561,7 @@
       const dropBtn = document.getElementById('dropSpItem');
       const dropCooldown = Math.ceil((state.spDropCooldownMs || 0) / 1000);
       dropBtn.disabled = !state.gameStarted || state.gameEnded || dropCooldown > 0;
-      dropBtn.textContent = dropCooldown > 0 ? `Drop SP Item (${dropCooldown}s)` : 'Drop SP Item';
+      dropBtn.textContent = dropCooldown > 0 ? `Thả SP Item (${dropCooldown}s)` : 'Thả SP Item';
 
       document.getElementById('metricPlayers').textContent = state.playerCount ?? state.players.length;
       document.getElementById('metricSwallowed').textContent = state.metrics.swallowed ?? 0;

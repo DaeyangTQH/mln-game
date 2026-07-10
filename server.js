@@ -31,7 +31,7 @@ const PLAYER_SPEED = 30;
 const RESOURCE_COUNT = 680;
 const PLAYER_START_RADIUS = 18;
 const PLAYER_START_MASS = Number(process.env.PLAYER_START_MASS) || 100;
-const MATCH_DURATION_MS = 2 * 60 * 1000;
+const MATCH_DURATION_MS = 15 * 60 * 1000;
 const RADIUS_GROWTH_SCALE = 1.5;       // ↑ lớn hơn = phình to nhanh hơn khi tăng mass
 const RESOURCE_MASS_GAIN = 5;         // ↑ lớn hơn = ăn tài nguyên tăng quy mô nhanh hơn
 const INFRA_PASSIVE_GAIN = 0.009;       // ↑ lớn hơn = thu nhập thụ động từ hạ tầng nhanh hơn
@@ -78,12 +78,12 @@ const resourceTypes = [
 const LOGO_COUNT = 12;
 
 const spItemTypes = [
-  { type: 'innovation', label: 'Doi moi cong nghe', rarity: 'common', weight: 30, color: '#2dd4bf', icon: 'x2', effect: { kind: 'resourceBoost', durationMs: EFFECT_MS } },
-  { type: 'distribution', label: 'Mo rong phan phoi', rarity: 'common', weight: 25, color: '#60a5fa', icon: '>>', effect: { kind: 'speedBoost', durationMs: EFFECT_MS, multiplier: 1.25 } },
-  { type: 'shield', label: 'Khien bao ho', rarity: 'uncommon', weight: 20, color: '#a78bfa', icon: 'SH', effect: { kind: 'shield', durationMs: EFFECT_MS } },
-  { type: 'credit', label: 'Von vay uu dai', rarity: 'rare', weight: 12, color: '#facc15', icon: '+%', effect: { kind: 'scorePercent' } },
-  { type: 'crisis', label: 'Khung hoang kinh te', rarity: 'rare', weight: 8, color: '#fb7185', icon: '-%', effect: { kind: 'scoreLoss' } },
-  { type: 'antitrust', label: 'Luat chong doc quyen', rarity: 'legendary', weight: 5, color: '#f97316', icon: 'LAW', effect: { kind: 'antitrust' } },
+  { type: 'innovation', label: 'Đổi mới công nghệ', rarity: 'common', weight: 30, color: '#2dd4bf', icon: 'x2', effect: { kind: 'resourceBoost', durationMs: EFFECT_MS } },
+  { type: 'distribution', label: 'Mở rộng phân phối', rarity: 'common', weight: 25, color: '#60a5fa', icon: '>>', effect: { kind: 'speedBoost', durationMs: EFFECT_MS, multiplier: 1.25 } },
+  { type: 'shield', label: 'Khiên bảo hộ', rarity: 'uncommon', weight: 20, color: '#a78bfa', icon: 'SH', effect: { kind: 'shield', durationMs: EFFECT_MS } },
+  { type: 'credit', label: 'Vốn vay ưu đãi', rarity: 'rare', weight: 12, color: '#facc15', icon: '+%', effect: { kind: 'scorePercent' } },
+  { type: 'crisis', label: 'Khủng hoảng kinh tế', rarity: 'rare', weight: 8, color: '#fb7185', icon: '-%', effect: { kind: 'scoreLoss' } },
+  { type: 'antitrust', label: 'Luật chống độc quyền', rarity: 'legendary', weight: 5, color: '#f97316', icon: 'LAW', effect: { kind: 'antitrust' } },
 ];
 
 const palette = [
@@ -180,11 +180,11 @@ function elapsedMs() {
 }
 
 function phaseForElapsed(ms) {
-  if (ms < 2 * 60 * 1000) return { phase: 1, name: 'Canh tranh tu do' };
-  if (ms < 7 * 60 * 1000) return { phase: 2, name: 'Tich tu tu ban' };
-  if (ms < 12 * 60 * 1000) return { phase: 3, name: 'Doc quyen' };
-  if (ms < 13 * 60 * 1000) return { phase: 4, name: 'Chuyen tiep dieu tiet' };
-  return { phase: 5, name: 'Doc quyen nha nuoc' };
+  if (ms < 2 * 60 * 1000) return { phase: 1, name: 'Cạnh tranh tự do' };
+  if (ms < 7 * 60 * 1000) return { phase: 2, name: 'Tích tụ tư bản' };
+  if (ms < 12 * 60 * 1000) return { phase: 3, name: 'Độc quyền' };
+  if (ms < 13 * 60 * 1000) return { phase: 4, name: 'Chuyển tiếp điều tiết' };
+  return { phase: 5, name: 'Độc quyền nhà nước' };
 }
 
 function updatePhaseByTime() {
@@ -194,7 +194,7 @@ function updatePhaseByTime() {
     game.phase = next.phase;
     game.phaseName = next.name;
     if (game.phase === 5) game.votes = {};
-    addEvent(`Giai doan ${game.phase}: ${game.phaseName}`, 'phase');
+    addEvent(`Giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
   }
 }
 
@@ -341,7 +341,7 @@ function dropSpItems() {
 
   game.spItems.push(...items);
   game.lastSpDropAt = now;
-  notifyAll(`Drop SP Item: ${items.length} item da roi tren map`, 'phase');
+  notifyAll(`Thả SP Item: ${items.length} vật phẩm đã rơi trên bản đồ`, 'phase');
   return true;
 }
 
@@ -360,7 +360,7 @@ function spawnPointBags(totalValue) {
     return {
       id: `bag-${now}-${idx}-${Math.random()}`,
       type: 'pointBag',
-      label: 'Tui diem dieu tiet',
+      label: 'Túi điểm điều tiết',
       position,
       x: position.x,
       y: position.y,
@@ -637,7 +637,7 @@ function respawnPlayer(p) {
   setTimedEffect(p, 'resourceBoostUntil', RESPAWN_BUFF_MS, now);
   setTimedEffect(p, 'speedBoostUntil', RESPAWN_BUFF_MS, now);
   p.effects.speedBoostMult = 1.2;
-  notifyPlayer(p.id, 'Hoi sinh: khien 10s, tang toc 20%, x2 diem tai nguyen', 'success');
+  notifyPlayer(p.id, 'Hồi sinh: khiên 10s, tăng tốc 20%, x2 điểm tài nguyên', 'success');
   syncLegacyFields(p);
 }
 
@@ -704,20 +704,20 @@ function applySpItem(p, item) {
   const now = Date.now();
   if (item.type === 'innovation') {
     setTimedEffect(p, 'resourceBoostUntil', EFFECT_MS, now);
-    notifyPlayer(p.id, 'Doi moi cong nghe: x2 diem/tang truong tai nguyen trong 15s', 'success');
+    notifyPlayer(p.id, 'Đổi mới công nghệ: x2 điểm/tăng trưởng tài nguyên trong 15s', 'success');
     return;
   }
 
   if (item.type === 'distribution') {
     setTimedEffect(p, 'speedBoostUntil', EFFECT_MS, now);
     p.effects.speedBoostMult = 1.25;
-    notifyPlayer(p.id, 'Mo rong phan phoi: +25% toc do trong 15s', 'success');
+    notifyPlayer(p.id, 'Mở rộng phân phối: +25% tốc độ trong 15s', 'success');
     return;
   }
 
   if (item.type === 'shield') {
     setTimedEffect(p, 'shieldUntil', EFFECT_MS, now);
-    notifyPlayer(p.id, 'Khien bao ho: khong bi thau tom trong 15s', 'success');
+    notifyPlayer(p.id, 'Khiên bảo hộ: không bị thâu tóm trong 15s', 'success');
     return;
   }
 
@@ -726,13 +726,13 @@ function applySpItem(p, item) {
     const percent = top3.has(p.id) ? 0.05 : 0.1;
     const amount = round1(scoreBase(p) * percent);
     addScore(p, amount);
-    notifyPlayer(p.id, `Von vay uu dai: +${Math.round(percent * 100)}% diem (+${amount})`, 'success');
+    notifyPlayer(p.id, `Vốn vay ưu đãi: +${Math.round(percent * 100)}% điểm (+${amount})`, 'success');
     return;
   }
 
   if (item.type === 'crisis') {
     const amount = subtractScorePercent(p, 0.1, false);
-    notifyPlayer(p.id, `Khung hoang kinh te: mat 10% diem (-${amount})`, 'warn');
+    notifyPlayer(p.id, `Khủng hoảng kinh tế: mất 10% điểm (-${amount})`, 'warn');
     return;
   }
 
@@ -749,18 +749,18 @@ function applyAntitrustItem(collector) {
 
   if (roll === 1) {
     const amount = subtractScorePercent(target, 0.1, true);
-    detail = `${target.name} mat 10% diem (-${amount}), diem bi chia thanh tui tren map`;
+    detail = `${target.name} mất 10% điểm (-${amount}), điểm bị chia thành túi trên bản đồ`;
   } else if (roll === 2) {
     setTimedEffect(target, 'monopolySlowUntil', EFFECT_MS);
-    detail = `${target.name} bi giam toc 20% trong 15s`;
-    notifyPlayer(target.id, 'Luat chong doc quyen: ban bi giam toc 20% trong 15s', 'warn');
+    detail = `${target.name} bị giảm tốc 20% trong 15s`;
+    notifyPlayer(target.id, 'Luật chống độc quyền: bạn bị giảm tốc 20% trong 15s', 'warn');
   } else {
     setTimedEffect(target, 'noSwallowUntil', EFFECT_MS);
-    detail = `${target.name} khong duoc thau tom nguoi khac trong 15s`;
-    notifyPlayer(target.id, 'Luat chong doc quyen: tam thoi khong duoc thau tom trong 15s', 'warn');
+    detail = `${target.name} không được thâu tóm người khác trong 15s`;
+    notifyPlayer(target.id, 'Luật chống độc quyền: tạm thời không được thâu tóm trong 15s', 'warn');
   }
 
-  notifyAll(`Luat chong doc quyen duoc ${collector.name} kich hoat: ${detail}`, 'danger');
+  notifyAll(`Luật chống độc quyền được ${collector.name} kích hoạt: ${detail}`, 'danger');
 }
 
 function collectSpItems(p) {
@@ -787,7 +787,7 @@ function collectPointBags(p) {
         addScore(p, bag.value);
         cell.mass += Math.max(1, bag.value * 0.25);
         game.pointBags.splice(i, 1);
-        notifyPlayer(p.id, `Nhan tui diem dieu tiet: +${round1(bag.value)} diem`, 'success');
+        notifyPlayer(p.id, `Nhận túi điểm điều tiết: +${round1(bag.value)} điểm`, 'success');
       }
     }
   }
@@ -951,8 +951,8 @@ function nextPhase() {
     2: 'Độc quyền hạ tầng điện/nước',
     3: 'Chính sách: Bán hay không bán?',
   };
-  names[4] = 'Chuyen tiep dieu tiet';
-  names[5] = 'Doc quyen nha nuoc';
+  names[4] = 'Chuyển tiếp điều tiết';
+  names[5] = 'Độc quyền nhà nước';
   game.phaseName = names[game.phase];
   if (game.phase === 5) game.votes = {};
   addEvent(`Chuyển sang giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
@@ -985,8 +985,8 @@ function updateAutoMonopoly() {
       if (p.id !== top.id && p.monopolySupervised) {
         p.monopolySupervised = false;
         p.monopolyPenaltyDueAt = 0;
-        notifyPlayer(p.id, 'Da thoat trang thai giam sat doc quyen', 'success');
-        addEvent(`${p.name} khong con la top 1, go giam sat doc quyen`, 'info');
+        notifyPlayer(p.id, 'Đã thoát trạng thái giám sát độc quyền', 'success');
+        addEvent(`${p.name} không còn là top 1, gỡ giám sát độc quyền`, 'info');
       }
     }
     game.topLeaderId = top.id;
@@ -998,23 +998,23 @@ function updateAutoMonopoly() {
     if (p.id !== top.id && p.monopolySupervised) {
       p.monopolySupervised = false;
       p.monopolyPenaltyDueAt = 0;
-      notifyPlayer(p.id, 'Da thoat trang thai giam sat doc quyen', 'success');
+      notifyPlayer(p.id, 'Đã thoát trạng thái giám sát độc quyền', 'success');
     }
   }
 
   if (!top.monopolySupervised && now - game.topLeaderSince >= AUTO_MONOPOLY_HOLD_MS) {
     top.monopolySupervised = true;
     top.monopolyPenaltyDueAt = now + AUTO_MONOPOLY_CHECK_MS;
-    notifyPlayer(top.id, 'Ban dang bi giam sat doc quyen: -10% toc do, kiem tra moi 30s', 'warn');
-    notifyAll(`${top.name} giu top 1 qua 30s va bi giam sat doc quyen`, 'danger');
+    notifyPlayer(top.id, 'Bạn đang bị giám sát độc quyền: -10% tốc độ, kiểm tra mỗi 30s', 'warn');
+    notifyAll(`${top.name} giữ top 1 quá 30s và bị giám sát độc quyền`, 'danger');
     return;
   }
 
   if (top.monopolySupervised && now >= top.monopolyPenaltyDueAt) {
     const amount = subtractScorePercent(top, 0.05, true);
     top.monopolyPenaltyDueAt = now + AUTO_MONOPOLY_CHECK_MS;
-    notifyPlayer(top.id, `Bi phat doc quyen: -5% diem (-${amount})`, 'warn');
-    notifyAll(`${top.name} bi tru 5% diem do duy tri vi the doc quyen`, 'danger');
+    notifyPlayer(top.id, `Bị phạt độc quyền: -5% điểm (-${amount})`, 'warn');
+    notifyAll(`${top.name} bị trừ 5% điểm do duy trì vị thế độc quyền`, 'danger');
   }
 }
 
@@ -1024,7 +1024,7 @@ function endMatchIfNeeded() {
   game.running = false;
   game.gameEnded = true;
   const winner = scoreRankings()[0];
-  notifyAll(winner ? `Het gio! Nguoi thang: ${winner.name} voi ${Math.round(winner.score)} diem` : 'Het gio! Chua co nguoi thang', 'phase');
+  notifyAll(winner ? `Hết giờ! Người thắng: ${winner.name} với ${Math.round(winner.score)} điểm` : 'Hết giờ! Chưa có người thắng', 'phase');
 }
 
 function updateMetrics() {
@@ -1098,15 +1098,15 @@ function personalState(p) {
     const remainingMs = Math.max(0, until - now);
     if (remainingMs > 0) effects.push({ key, label, remainingMs });
   };
-  push('resourceBoost', 'x2 tai nguyen', p.effects?.resourceBoostUntil || 0);
-  push('shield', 'Khien bao ho', p.effects?.shieldUntil || 0);
-  push('speedBoost', 'Tang toc', p.effects?.speedBoostUntil || 0);
-  push('monopolySlow', 'Giam toc doc quyen', p.effects?.monopolySlowUntil || 0);
-  push('noSwallow', 'Cam thau tom', p.effects?.noSwallowUntil || 0);
+  push('resourceBoost', 'x2 tài nguyên', p.effects?.resourceBoostUntil || 0);
+  push('shield', 'Khiên bảo hộ', p.effects?.shieldUntil || 0);
+  push('speedBoost', 'Tăng tốc', p.effects?.speedBoostUntil || 0);
+  push('monopolySlow', 'Giảm tốc độc quyền', p.effects?.monopolySlowUntil || 0);
+  push('noSwallow', 'Cấm thâu tóm', p.effects?.noSwallowUntil || 0);
   if (p.monopolySupervised) {
     effects.push({
       key: 'supervised',
-      label: 'Bi giam sat doc quyen',
+      label: 'Bị giám sát độc quyền',
       remainingMs: Math.max(0, (p.monopolyPenaltyDueAt || now) - now),
     });
   }
@@ -1289,7 +1289,7 @@ io.on('connection', (socket) => {
     if (action === 'dropSpItems') {
       if (!game.gameStarted || game.gameEnded) return;
       const ok = dropSpItems();
-      if (!ok) socket.emit('notice', { message: 'Drop SP Item dang cooldown', kind: 'warn', at: Date.now(), scope: 'host' });
+      if (!ok) socket.emit('notice', { message: 'Thả SP Item đang hồi chiêu', kind: 'warn', at: Date.now(), scope: 'host' });
     }
     if (action === 'pause') {
       if (!game.gameStarted) return;
