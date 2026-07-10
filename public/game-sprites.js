@@ -221,6 +221,19 @@ window.GameSprites = (() => {
     ctx.restore();
   }
 
+  function drawEjectedMass(ctx, x, y, radius, color) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.fillStyle = color || '#93C5FD';
+    ctx.globalAlpha = 0.92;
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.75)';
+    ctx.lineWidth = Math.max(1, radius * 0.22);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawInfrastructure(ctx, infra, x, y, radius) {
     const sprite = INFRA_SPRITE[infra.type] ?? 8;
     ctx.save();
@@ -279,18 +292,43 @@ window.GameSprites = (() => {
       const olderById = new Map();
       for (const p of older.players) olderById.set(p.id, p);
 
+      function interpCells(op, np) {
+        if (!op?.cells?.length || !np?.cells?.length) return np.cells || [];
+        const oldById = new Map(op.cells.map(c => [c.id, c]));
+        return np.cells.map((nc) => {
+          const oc = oldById.get(nc.id);
+          if (!oc) return nc;
+          const dx = nc.x - oc.x;
+          const dy = nc.y - oc.y;
+          if (dx * dx + dy * dy > snapSq) return nc;
+          return {
+            ...nc,
+            x: oc.x + dx * alpha,
+            y: oc.y + dy * alpha,
+            radius: oc.radius + (nc.radius - oc.radius) * alpha,
+          };
+        });
+      }
+
       return newer.players.map((np) => {
         const op = olderById.get(np.id);
         if (!op) return np;
         const dx = np.x - op.x;
         const dy = np.y - op.y;
-        // Nhảy quá xa (respawn/teleport) → không nội suy để tránh trượt ngang màn
-        if (dx * dx + dy * dy > snapSq) return np;
+        const cells = interpCells(op, np);
+        const lc = cells.length
+          ? cells.reduce((a, b) => (b.mass > a.mass ? b : a), cells[0])
+          : null;
+        if (dx * dx + dy * dy > snapSq) {
+          return { ...np, cells: np.cells || cells };
+        }
         return {
           ...np,
           x: op.x + dx * alpha,
           y: op.y + dy * alpha,
           radius: op.radius + (np.radius - op.radius) * alpha,
+          cells: cells.length ? cells : np.cells,
+          ...(lc ? { x: lc.x, y: lc.y, radius: lc.radius } : {}),
         };
       });
     }
@@ -339,6 +377,7 @@ window.GameSprites = (() => {
     drawResource,
     drawResourceScreen,
     drawInfrastructure,
+    drawEjectedMass,
     buildLogoPicker,
     createSnapshotBuffer,
     playerViewHalf,

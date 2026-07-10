@@ -32,6 +32,7 @@
       <div class="hc-actions">
         <button type="button" class="btn-primary btn-md" id="startGame">Bắt đầu game</button>
         <button type="button" class="btn-primary btn-md" id="nextPhase">Chuyển giai đoạn</button>
+        <button type="button" class="btn-primary btn-md" id="dropSpItem">Thả SP Item</button>
         <button type="button" class="btn-secondary btn-sm" id="pause">Tạm dừng</button>
         <button type="button" class="btn-warn btn-sm" id="reset">Chơi lại</button>
         <div class="hc-settings">
@@ -50,6 +51,7 @@
     <div class="hc-main" id="hostMain">
       <div class="hc-map-frame" id="hostStage">
         <canvas id="gameCanvas"></canvas>
+        <div class="hc-toast hide" id="hostToast"></div>
         <div class="hc-lobby-overlay" id="lobbyOverlay">
           <div>
             <h2>Đang chờ người chơi…</h2>
@@ -182,6 +184,36 @@
           { title: 'Điều tiết', sub: 'Cân bằng lợi ích', sheet: 'policy', index: 8 },
         ],
       },
+    };
+
+    PHASE_EXPLAIN[3] = {
+      short: 'Giai đoạn 3: Độc quyền — hệ thống theo dõi top 1; giữ vị trí quá lâu sẽ bị giám sát và điều tiết.',
+      flow: 'Tích tụ tư bản → Top 1 chi phối → Giám sát độc quyền → Phân phối lại điểm phạt',
+      cards: [
+        { title: 'Top 1', sub: 'Doanh nghiệp chi phối', sheet: 'policy', index: 14 },
+        { title: 'Giám sát', sub: 'Giảm tốc và kiểm tra 30s', sheet: 'policy', index: 6 },
+        { title: 'Túi điểm', sub: 'Điểm phạt rơi lại bản đồ', sheet: 'icons', index: 0 },
+      ],
+    };
+
+    PHASE_EXPLAIN[4] = {
+      short: 'Giai đoạn 4: Chuyển tiếp điều tiết — thị trường vẫn cạnh tranh nhưng luật chống độc quyền bắt đầu tạo áp lực rõ hơn.',
+      flow: 'Độc quyền → Giám sát → Phân phối lại nguồn lực → Chuẩn bị điều tiết mạnh',
+      cards: [
+        { title: 'Giám sát', sub: 'Theo dõi top 1', sheet: 'policy', index: 6 },
+        { title: 'Túi điểm', sub: 'Nguồn lực được phân phối lại', sheet: 'policy', index: 14 },
+        { title: 'SP Item', sub: 'Cơ hội đảo chiều', sheet: 'icons', index: 2 },
+      ],
+    };
+
+    PHASE_EXPLAIN[5] = {
+      short: 'Giai đoạn 5: Độc quyền nhà nước — Nhà nước can thiệp mạnh hơn để hạn chế top 1 snowball và mở cơ hội comeback.',
+      flow: 'Độc quyền → Điều tiết nhà nước → Chống độc quyền → Cân bằng thị trường',
+      cards: [
+        { title: 'Luật chống độc quyền', sub: 'Kiềm chế doanh nghiệp quá lớn', sheet: 'policy', index: 6 },
+        { title: 'Bình chọn', sub: 'Lựa chọn chính sách', sheet: 'policy', index: 7 },
+        { title: 'Điều tiết', sub: 'Cân bằng lợi ích', sheet: 'policy', index: 8 },
+      ],
     };
 
     const panelState = { topbar: true, sidebar: true, bottom: true, vote: true };
@@ -331,6 +363,50 @@
       ctx.restore();
     }
 
+    function drawSpItem(item) {
+      const p = worldToScreen(item.x, item.y);
+      const r = Math.max(9, item.radius * camera.scale);
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = item.color || '#f97316';
+      ctx.shadowColor = item.color || '#f97316';
+      ctx.shadowBlur = 12;
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = `900 ${Math.max(8, r * 0.58)}px sans-serif`;
+      ctx.fillStyle = '#23352F';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(item.icon || 'SP', p.x, p.y);
+      ctx.restore();
+    }
+
+    function drawPointBag(bag) {
+      const p = worldToScreen(bag.x, bag.y);
+      const r = Math.max(8, bag.radius * camera.scale);
+      ctx.save();
+      ctx.beginPath();
+      ctx.fillStyle = '#fbbf24';
+      ctx.shadowColor = 'rgba(251,191,36,.75)';
+      ctx.shadowBlur = 10;
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = 'rgba(255,255,255,.9)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = `900 ${Math.max(8, r * 0.7)}px sans-serif`;
+      ctx.fillStyle = '#23352F';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('$', p.x, p.y);
+      ctx.restore();
+    }
+
     function drawInfrastructure(i) {
       if (state.phase < 2) return;
       const p = worldToScreen(i.x, i.y);
@@ -349,35 +425,47 @@
       ctx.restore();
     }
 
+    function playerCells(p) {
+      if (p?.cells?.length) return p.cells;
+      return [{ x: p.x, y: p.y, radius: p.radius, mass: p.mass }];
+    }
+
     function drawPlayer(p) {
-      const pos = worldToScreen(p.x, p.y);
-      const screenR = Math.max(6, p.radius * camera.scale * PROJECTOR_SCALE);
+      const cells = playerCells(p);
+      const labelCell = cells.reduce((a, b) => (b.mass > a.mass ? b : a), cells[0]);
 
-      // Quầng mờ + viền hitbox — trùng radius server (screenR)
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, screenR + 4, 0, Math.PI * 2);
-      ctx.fillStyle = p.color || '#7BA392';
-      ctx.globalAlpha = 0.3;
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(255,255,255,.88)';
-      ctx.lineWidth = Math.max(1.5, screenR * 0.07);
-      ctx.stroke();
-      ctx.restore();
+      for (const cell of cells) {
+        const pos = worldToScreen(cell.x, cell.y);
+        const screenR = Math.max(6, cell.radius * camera.scale * PROJECTOR_SCALE);
 
-      ctx.save();
-      if (GameSprites.isReady()) {
-        GameSprites.drawPlayerScreen(ctx, p, pos.x, pos.y, screenR);
-      } else {
+        ctx.save();
         ctx.beginPath();
-        ctx.fillStyle = p.color;
-        ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
+        ctx.arc(pos.x, pos.y, screenR + 4, 0, Math.PI * 2);
+        ctx.fillStyle = p.color || '#7BA392';
+        ctx.globalAlpha = 0.3;
         ctx.fill();
+        ctx.globalAlpha = 1;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(255,255,255,.88)';
+        ctx.lineWidth = Math.max(1.5, screenR * 0.07);
+        ctx.stroke();
+        ctx.restore();
+
+        if (GameSprites.isReady()) {
+          GameSprites.drawPlayerScreen(ctx, p, pos.x, pos.y, screenR);
+        } else {
+          ctx.beginPath();
+          ctx.fillStyle = p.color;
+          ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
 
+      const pos = worldToScreen(labelCell.x, labelCell.y);
+      const screenR = Math.max(6, labelCell.radius * camera.scale * PROJECTOR_SCALE);
+
+      ctx.save();
       const nameSize = Math.max(13, screenR * 0.42);
       ctx.font = `900 ${nameSize}px sans-serif`;
       ctx.textAlign = 'center';
@@ -401,6 +489,12 @@
       ctx.restore();
     }
 
+    function drawEjected(e) {
+      const p = worldToScreen(e.x, e.y);
+      const screenR = Math.max(3, e.radius * camera.scale);
+      GameSprites.drawEjectedMass(ctx, p.x, p.y, screenR, e.color);
+    }
+
     function render() {
       const { w, h } = stageSize();
       ctx.clearRect(0, 0, w, h);
@@ -408,6 +502,9 @@
       drawDecorations();
       if (state) {
         resourceCache.forEach(drawResource);
+        (state.pointBags || []).forEach(drawPointBag);
+        (state.spItems || []).forEach(drawSpItem);
+        (state.ejected || []).forEach(drawEjected);
         state.infrastructures.forEach(drawInfrastructure);
         playerBuffer.sample().slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
       }
@@ -461,6 +558,10 @@
       document.getElementById('pause').textContent = state.running ? 'Tạm dừng' : 'Tiếp tục';
       document.getElementById('pause').disabled = !state.gameStarted;
       document.getElementById('nextPhase').disabled = !state.gameStarted;
+      const dropBtn = document.getElementById('dropSpItem');
+      const dropCooldown = Math.ceil((state.spDropCooldownMs || 0) / 1000);
+      dropBtn.disabled = !state.gameStarted || state.gameEnded || dropCooldown > 0;
+      dropBtn.textContent = dropCooldown > 0 ? `Thả SP Item (${dropCooldown}s)` : 'Thả SP Item';
 
       document.getElementById('metricPlayers').textContent = state.playerCount ?? state.players.length;
       document.getElementById('metricSwallowed').textContent = state.metrics.swallowed ?? 0;
@@ -496,7 +597,7 @@
       `).join('') || '<div style="font-size:13px;color:var(--hc-text-muted)">Chưa có sự kiện.</div>';
 
       const vp = document.getElementById('votePanel');
-      const showVote = state.phase === 3 && panelState.vote && state.gameStarted;
+      const showVote = state.phase === 5 && panelState.vote && state.gameStarted;
       vp.classList.toggle('hide', !showVote);
       const total = Math.max(1, state.voteCounts.A + state.voteCounts.B + state.voteCounts.C);
       ['A', 'B', 'C'].forEach(k => {
@@ -519,6 +620,16 @@
       }
     });
 
+    let hostToastTimer = null;
+    socket.on('notice', notice => {
+      if (!notice || notice.scope === 'personal') return;
+      const el = document.getElementById('hostToast');
+      el.textContent = notice.message || '';
+      el.classList.remove('hide');
+      clearTimeout(hostToastTimer);
+      hostToastTimer = setTimeout(() => el.classList.add('hide'), 4200);
+    });
+
     function startGame() {
       socket.emit('hostAction', 'startGame');
     }
@@ -526,6 +637,7 @@
     document.getElementById('startGameLobby').onclick = startGame;
 
     document.getElementById('nextPhase').onclick = () => socket.emit('hostAction', 'nextPhase');
+    document.getElementById('dropSpItem').onclick = () => socket.emit('hostAction', 'dropSpItems');
     document.getElementById('pause').onclick = () => socket.emit('hostAction', 'pause');
     document.getElementById('reset').onclick = () => {
       if (confirm('Bạn có chắc muốn chơi lại từ đầu không?')) {
