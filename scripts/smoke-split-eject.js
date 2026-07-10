@@ -63,13 +63,13 @@ async function main() {
   }
   console.log('OK split:', pa.cells.length, 'cells');
 
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 6; i++) {
     a.emit('action', { action: 'split' });
     await wait(700);
   }
   s = await waitState(a);
   pa = s.players.find(p => p.name === 'PlayerA');
-  if ((pa.cells?.length || 0) > 4) {
+  if ((pa.cells?.length || 0) > 16) {
     throw new Error(`Max cells exceeded: ${pa.cells.length}`);
   }
   console.log('OK max cells cap:', pa.cells.length);

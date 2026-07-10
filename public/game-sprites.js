@@ -57,8 +57,8 @@ window.GameSprites = (() => {
     { title: 'Đường ống', sub: 'Độc quyền tự nhiên', sheet: 'policy', index: 12 },
   ];
 
-  // Đường kính logo / hitbox — dùng chung host & player
-  const LOGO_DIAMETER_SCALE = 1.82;
+  // Đường kính object màu / hitbox — dùng chung host & player
+  const LOGO_DIAMETER_SCALE = 2;
   const RESOURCE_DIAMETER_SCALE = 2.35;
   // Nhân vật luôn chiếm ~21% chiều ngang màn player (giống Agar.io)
   const PLAYER_SCREEN_RADIUS_RATIO = 0.105;
@@ -119,6 +119,49 @@ window.GameSprites = (() => {
     ctx.restore();
   }
 
+  function shadeHex(hex, amount) {
+    const clean = String(hex || '').replace('#', '');
+    const value = /^[0-9a-f]{6}$/i.test(clean) ? clean : '93C5FD';
+    const parts = [0, 2, 4].map(i => parseInt(value.slice(i, i + 2), 16));
+    return `rgb(${parts.map(v => Math.max(0, Math.min(255, v + amount))).join(',')})`;
+  }
+
+  function drawColorCircle(ctx, player, x, y, radius, opts = {}) {
+    const color = player.color || '#93C5FD';
+    const grd = ctx.createRadialGradient(
+      x - radius * 0.32, y - radius * 0.34, radius * 0.08,
+      x, y, radius
+    );
+    grd.addColorStop(0, shadeHex(color, 64));
+    grd.addColorStop(0.62, color);
+    grd.addColorStop(1, shadeHex(color, -46));
+
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fillStyle = grd;
+    ctx.fill();
+
+    ctx.lineWidth = Math.max(1.5, radius * 0.08);
+    ctx.strokeStyle = 'rgba(255,255,255,.72)';
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(1, radius - ctx.lineWidth / 2), 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.lineWidth = Math.max(1, radius * 0.035);
+    ctx.strokeStyle = 'rgba(35,53,47,.22)';
+    ctx.beginPath();
+    ctx.arc(x, y, Math.max(1, radius - ctx.lineWidth / 2), 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (opts.highlight) {
+      ctx.lineWidth = Math.max(2, radius * 0.07);
+      ctx.strokeStyle = 'rgba(56,189,248,.95)';
+      ctx.beginPath();
+      ctx.arc(x, y, Math.max(1, radius - ctx.lineWidth * 1.5), 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+
   function playerViewHalf(radius, screenMin = 400) {
     const r = Math.max(16, radius || 18);
     const half = r / (2 * PLAYER_SCREEN_RADIUS_RATIO);
@@ -127,48 +170,18 @@ window.GameSprites = (() => {
   }
 
   function drawPlayerWorld(ctx, player, x, y, radius, opts = {}) {
-    const logoIndex = Number.isInteger(player.logoIndex) ? player.logoIndex : 0;
-    const diameter = radius * LOGO_DIAMETER_SCALE;
     const clipR = radius;
     ctx.save();
     ctx.globalAlpha = player.alive === false ? 0.28 : 1;
-    ctx.beginPath();
-    ctx.arc(x, y, clipR, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.shadowColor = 'rgba(0,0,0,.4)';
-    ctx.shadowBlur = 6;
-    drawSprite(ctx, 'logos', logoIndex, x, y, diameter);
-    ctx.shadowBlur = 0;
-    if (opts.highlight) {
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(56,189,248,.95)';
-      ctx.lineWidth = Math.max(2, radius * 0.08);
-      ctx.arc(x, y, clipR + 2, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    drawColorCircle(ctx, player, x, y, clipR, opts);
     ctx.restore();
   }
 
   function drawPlayerScreen(ctx, player, sx, sy, screenRadius, opts = {}) {
-    const logoIndex = Number.isInteger(player.logoIndex) ? player.logoIndex : 0;
-    const diameter = screenRadius * LOGO_DIAMETER_SCALE;
     const clipR = screenRadius;
     ctx.save();
     ctx.globalAlpha = player.alive === false ? 0.28 : 1;
-    ctx.beginPath();
-    ctx.arc(sx, sy, clipR, 0, Math.PI * 2);
-    ctx.clip();
-    ctx.shadowColor = 'rgba(0,0,0,.4)';
-    ctx.shadowBlur = 5;
-    drawSprite(ctx, 'logos', logoIndex, sx, sy, diameter);
-    ctx.shadowBlur = 0;
-    if (opts.highlight) {
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(56,189,248,.95)';
-      ctx.lineWidth = 2.5;
-      ctx.arc(sx, sy, clipR + 2, 0, Math.PI * 2);
-      ctx.stroke();
-    }
+    drawColorCircle(ctx, player, sx, sy, clipR, opts);
     ctx.restore();
   }
 

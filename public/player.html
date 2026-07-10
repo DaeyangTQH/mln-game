@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Nuốt Thị Trường - Player</title>
-  <link rel="stylesheet" href="/style.css" />
+  <link rel="stylesheet" href="/style.css?v=20260711-6" />
 </head>
 <body>
   <main class="player-page">
@@ -15,8 +15,18 @@
       <h1>Nuốt Thị Trường</h1>
       <p>Bạn là một doanh nghiệp nhỏ. Hãy thu thập vốn, công nghệ, khách hàng để lớn lên. Khi đủ lớn, bạn có thể thâu tóm doanh nghiệp nhỏ hơn.</p>
       <input id="nameInput" maxlength="24" placeholder="Tên doanh nghiệp của bạn" />
-      <div class="section-title" style="margin-top:4px">Chọn logo doanh nghiệp</div>
-      <div class="logo-picker" id="logoPicker"></div>
+      <div class="section-title" style="margin-top:4px">Chọn màu doanh nghiệp</div>
+      <div class="color-picker" id="colorPicker">
+        <label class="color-preview-wrap" aria-label="Chọn màu">
+          <input id="colorInput" type="color" value="#3B82F6" />
+          <span class="color-preview" id="colorPreview"></span>
+        </label>
+        <button type="button" class="color-picker-button" id="openColorPicker">
+          <span>Chọn màu</span>
+          <strong id="colorValue">#3B82F6</strong>
+        </button>
+        <div class="color-swatches" id="colorSwatches"></div>
+      </div>
       <button id="joinBtn" style="width:100%">Gia nhập thị trường</button>
       <p class="small" style="margin-top:12px">Gợi ý tên: Tổng tài Aqua, Điện Sấm Sét, Nước Đại Phát, Market Boss...</p>
     </section>
@@ -35,7 +45,7 @@
           <span class="flow-arrow">→</span>
           <div class="flow-step"><span class="flow-icon"><i class="sprite-chip" data-sheet="policy" data-idx="13"></i></span><strong>Tăng quy mô</strong><small>Càng nhiều điểm càng to</small></div>
           <span class="flow-arrow">→</span>
-          <div class="flow-step"><span class="flow-icon"><i class="sprite-chip" data-sheet="logos" data-idx="6"></i></span><strong>Thâu tóm</strong><small>To hơn rõ rệt mới nuốt được</small></div>
+          <div class="flow-step"><span class="flow-icon color-flow-dot"></span><strong>Thâu tóm</strong><small>To hơn rõ rệt mới nuốt được</small></div>
           <span class="flow-arrow">→</span>
           <div class="flow-step winner"><span class="flow-icon"><i class="sprite-chip" data-sheet="policy" data-idx="3"></i></span><strong>Dẫn đầu</strong><small>Hết giờ ai nhiều điểm nhất thắng</small></div>
         </div>
@@ -119,10 +129,6 @@
           <h2 id="playerName">Doanh nghiệp</h2>
           <div class="sub" id="phaseText">Giai đoạn 1 · Cạnh tranh tự do</div>
         </div>
-        <div style="text-align:right">
-          <div class="kicker">Quy mô</div>
-          <div style="font-size:28px;font-weight:950" id="massDisplay">0</div>
-        </div>
       </div>
       <div class="player-effects" id="effectPanel"></div>
       <div class="notice-stack" id="noticeStack"></div>
@@ -131,7 +137,14 @@
         <canvas id="viewCanvas" aria-label="Khu vực xung quanh doanh nghiệp của bạn"></canvas>
         <div class="viewport-hud">
           <div class="viewport-tag">Tầm nhìn hạn chế</div>
-          <div class="viewport-stats" id="viewportStats">Quy mô: —</div>
+        </div>
+        <div class="player-leaderboard" id="playerLeaderboard"></div>
+        <div class="bottom-left-hud">
+          <div class="status-score">
+            <div class="kicker">Điểm</div>
+            <div class="score-value" id="massDisplay">0</div>
+          </div>
+          <div class="viewport-stats" id="viewportStats">Thâu tóm: 0 · Bị thâu tóm: 0</div>
         </div>
         <div class="viewport-overlay hide" id="viewportOverlay">
           <div>
@@ -140,15 +153,6 @@
             <p class="small">Đang tái gia nhập thị trường...</p>
           </div>
         </div>
-      </div>
-
-      <div class="panel joystick-wrap">
-        <div class="joystick" id="joystick"><div class="knob" id="knob"></div></div>
-        <div class="action-buttons" id="actionButtons">
-          <button type="button" class="action-btn" id="btnSplit">Tách</button>
-          <button type="button" class="action-btn" id="btnEject">Bắn vốn</button>
-        </div>
-        <div class="small" style="margin-top:10px;text-align:center">Di chuột để di chuyển (mobile: joystick) · Space: tách · W: bắn vốn</div>
       </div>
 
       <div class="panel vote-buttons hide" id="voteButtons">
@@ -160,7 +164,7 @@
     </section>
   </main>
 
-  <script src="/game-sprites.js"></script>
+  <script src="/game-sprites.js?v=20260711-4"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -170,8 +174,9 @@
     const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
     let selfRender = null;
     let lastFrameTs = 0;
+    let focusCellId = null;
     let currentVote = null;
-    let selectedLogo = 0;
+    let selectedColor = '#3B82F6';
     const onboarding = document.getElementById('onboarding');
     const hud = document.getElementById('hud');
     const joystick = document.getElementById('joystick');
@@ -181,44 +186,69 @@
     const viewCtx = viewCanvas.getContext('2d');
     const viewportOverlay = document.getElementById('viewportOverlay');
     const viewportStats = document.getElementById('viewportStats');
+    const playerLeaderboard = document.getElementById('playerLeaderboard');
     const effectPanel = document.getElementById('effectPanel');
     const noticeStack = document.getElementById('noticeStack');
+    const colorInput = document.getElementById('colorInput');
+    const colorPreview = document.getElementById('colorPreview');
+    const openColorPicker = document.getElementById('openColorPicker');
+    const colorValue = document.getElementById('colorValue');
+    const colorSwatches = document.getElementById('colorSwatches');
     const mapImage = new Image();
     let mapReady = false;
-    // Chỉ player: bake PNG → canvas world-size 1 lần, tránh scale lại mỗi frame (host không đụng)
-    let playerMapCanvas = null;
-    let playerMapWorldKey = '';
+    let lastPlayerUiUpdate = 0;
+    let lastEffectsHtml = '';
     mapImage.onload = () => {
       mapReady = true;
-      if (state?.world) ensurePlayerMapBake(state.world);
     };
     mapImage.src = GameSprites.ASSET.tiles.island;
 
     function ensurePlayerMapBake(world) {
-      if (!mapReady || !world) return null;
-      const key = `${world.width}x${world.height}`;
-      if (playerMapCanvas && playerMapWorldKey === key) return playerMapCanvas;
-      const baked = document.createElement('canvas');
-      baked.width = world.width;
-      baked.height = world.height;
-      const bctx = baked.getContext('2d');
-      bctx.imageSmoothingEnabled = true;
-      if ('imageSmoothingQuality' in bctx) bctx.imageSmoothingQuality = 'high';
-      bctx.drawImage(mapImage, 0, 0, world.width, world.height);
-      playerMapCanvas = baked;
-      playerMapWorldKey = key;
-      return playerMapCanvas;
+      return null;
     }
     GameSprites.loadAll();
-    GameSprites.buildLogoPicker(document.getElementById('logoPicker'), idx => { selectedLogo = idx; }, 0);
+    buildColorPicker();
 
     document.getElementById('joinBtn').onclick = join;
     document.getElementById('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 
     function join() {
       const name = document.getElementById('nameInput').value.trim() || 'Doanh nghiệp mới';
-      socket.emit('joinGame', { name, logoIndex: selectedLogo });
+      socket.emit('joinGame', { name, color: selectedColor });
       document.getElementById('joinBtn').textContent = 'Đang vào thị trường...';
+    }
+
+    function hexToRgb(hex) {
+      const clean = String(hex || '').replace('#', '');
+      const value = /^[0-9a-f]{6}$/i.test(clean) ? clean : '3B82F6';
+      return {
+        r: parseInt(value.slice(0, 2), 16),
+        g: parseInt(value.slice(2, 4), 16),
+        b: parseInt(value.slice(4, 6), 16),
+      };
+    }
+
+    function setSelectedColor(hex) {
+      const { r, g, b } = hexToRgb(hex);
+      selectedColor = `#${[r, g, b].map(v => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+      colorInput.value = selectedColor;
+      colorPreview.style.background = selectedColor;
+      colorValue.textContent = selectedColor;
+      colorSwatches.querySelectorAll('button').forEach(btn => {
+        btn.classList.toggle('selected', btn.dataset.color === selectedColor);
+      });
+    }
+
+    function buildColorPicker() {
+      const swatches = ['#3B82F6', '#22C55E', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4', '#EC4899', '#84CC16', '#F97316', '#14B8A6', '#64748B', '#FACC15'];
+      colorSwatches.innerHTML = swatches.map(color => `<button type="button" data-color="${color}" style="background:${color}" aria-label="${color}"></button>`).join('');
+      colorInput.addEventListener('input', () => setSelectedColor(colorInput.value));
+      openColorPicker.addEventListener('click', () => colorInput.click());
+      colorSwatches.addEventListener('click', e => {
+        const btn = e.target.closest('button[data-color]');
+        if (btn) setSelectedColor(btn.dataset.color);
+      });
+      setSelectedColor(selectedColor);
     }
 
     socket.on('joined', ({ id, player }) => {
@@ -227,6 +257,7 @@
       onboarding.classList.add('hide');
       hud.classList.remove('hide');
       document.getElementById('playerName').textContent = player.name;
+      focusCellId = player.cells?.[0]?.id || player.id;
       if (document.activeElement) document.activeElement.blur();
       const box = viewCanvas.parentElement.getBoundingClientRect();
       mouseClient.x = box.left + box.width / 2;
@@ -238,17 +269,21 @@
 
     socket.on('state', s => {
       state = s;
-      if (s.world) ensurePlayerMapBake(s.world);
       if (s.resources) resourceCache = s.resources;
       if (s.players) playerBuffer.push(s.players);
       if (!myId) return;
-      const me = state.players.find(p => p.id === myId);
-      document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
-      voteButtons.classList.toggle('hide', state.phase !== 5);
-      if (me) {
-        document.getElementById('massDisplay').textContent = Math.round(me.mass);
-        viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
-        viewportOverlay.classList.toggle('hide', me.alive);
+      const now = performance.now();
+      if (now - lastPlayerUiUpdate > 120) {
+        lastPlayerUiUpdate = now;
+        const me = state.players.find(p => p.id === myId);
+        document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
+        voteButtons.classList.toggle('hide', state.phase !== 5);
+        if (me) {
+          document.getElementById('massDisplay').textContent = Math.round(me.score);
+          viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
+          viewportOverlay.classList.toggle('hide', me.alive);
+        }
+        renderPlayerLeaderboard(state.leaderboard || []);
       }
     });
 
@@ -264,7 +299,7 @@
 
     function resizeViewport() {
       const box = viewCanvas.parentElement.getBoundingClientRect();
-      const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       viewCanvas.width = Math.max(1, Math.floor(box.width * dpr));
       viewCanvas.height = Math.max(1, Math.floor(box.height * dpr));
       viewCanvas.style.width = `${box.width}px`;
@@ -276,25 +311,17 @@
     new ResizeObserver(resizeViewport).observe(viewCanvas.parentElement);
 
     function cameraFor(me, w, h) {
-      const baseHalf = GameSprites.playerViewHalf(me ? me.radius : 18, Math.min(w, h));
-      let viewHalf = Math.max(280, Math.min(460, baseHalf * 1.2));
+      const radius = Math.max(16, me ? me.radius : 18);
+      const visibleRadius = Math.max(250, Math.min(980, 185 + radius * 1.18));
+      let viewHalf = Math.max(visibleRadius * 0.88, Math.min(980, visibleRadius * 1.06));
       let scale = Math.min(w, h) / (viewHalf * 2);
-
-      // Chỉ player: không zoom quá mức làm map bị phóng to vượt pixel đã bake
-      if (mapReady && state?.world) {
-        const baked = ensurePlayerMapBake(state.world);
-        const texW = baked ? state.world.width : (mapImage.naturalWidth || state.world.width);
-        const maxSharpScale = texW / state.world.width;
-        if (scale > maxSharpScale) {
-          scale = maxSharpScale;
-          viewHalf = Math.min(w, h) / (2 * scale);
-        }
-      }
 
       return {
         scale,
         viewHalf,
-        sightRadius: viewHalf * 0.72,
+        sightRadius: visibleRadius,
+        width: w,
+        height: h,
         x: w / 2 - me.x * scale,
         y: h / 2 - me.y * scale,
       };
@@ -308,19 +335,43 @@
     }
 
     function isNearSight(item, me, camera, margin = 0) {
-      return Math.hypot(item.x - me.x, item.y - me.y) <= camera.sightRadius + margin;
+      const left = -camera.x / camera.scale - margin;
+      const top = -camera.y / camera.scale - margin;
+      const right = (camera.width - camera.x) / camera.scale + margin;
+      const bottom = (camera.height - camera.y) / camera.scale + margin;
+      return item.x >= left && item.x <= right && item.y >= top && item.y <= bottom;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, ch => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+      }[ch]));
+    }
+
+    function renderPlayerLeaderboard(list = []) {
+      playerLeaderboard.innerHTML = list.slice(0, 10).map(p => `
+        <div class="player-leaderboard-row ${p.alive ? '' : 'dead'}">
+          <span class="rank">${p.rank}</span>
+          <span class="player-dot" style="background:${p.color || '#3B82F6'}"></span>
+          <span class="name">${escapeHtml(p.name)}</span>
+          <span class="score">${Math.round(p.score || 0)}</span>
+        </div>
+      `).join('');
     }
 
     function drawInfiniteMap(camera, w, h) {
       const world = state.world;
-      viewCtx.fillStyle = '#23413b';
+      viewCtx.fillStyle = '#000';
       viewCtx.fillRect(0, 0, w, h);
       if (!mapReady) return;
 
-      const baked = ensurePlayerMapBake(world);
-      const mapSource = baked || mapImage;
-      const imgW = baked ? world.width : (mapImage.naturalWidth || world.width);
-      const imgH = baked ? world.height : (mapImage.naturalHeight || world.height);
+      const mapSource = mapImage;
+      const imgW = mapImage.naturalWidth || world.width;
+      const imgH = mapImage.naturalHeight || world.height;
       const srcPerWorldX = imgW / world.width;
       const srcPerWorldY = imgH / world.height;
 
@@ -328,38 +379,27 @@
       const top = -camera.y / camera.scale;
       const right = (w - camera.x) / camera.scale;
       const bottom = (h - camera.y) / camera.scale;
-      const startX = Math.floor(left / world.width) * world.width;
-      const startY = Math.floor(top / world.height) * world.height;
 
       const upscale = camera.scale * (world.width / imgW);
       viewCtx.save();
       viewCtx.imageSmoothingEnabled = upscale > 1.02;
       if ('imageSmoothingQuality' in viewCtx) viewCtx.imageSmoothingQuality = 'high';
 
-      for (let tileX = startX; tileX < right; tileX += world.width) {
-        for (let tileY = startY; tileY < bottom; tileY += world.height) {
-          const ix = Math.max(left, tileX);
-          const iy = Math.max(top, tileY);
-          const ix2 = Math.min(right, tileX + world.width);
-          const iy2 = Math.min(bottom, tileY + world.height);
-          if (ix >= ix2 || iy >= iy2) continue;
-
-          const localX = ix - tileX;
-          const localY = iy - tileY;
-          const localW = ix2 - ix;
-          const localH = iy2 - iy;
-
-          viewCtx.globalAlpha = tileX === 0 && tileY === 0 ? 1 : 0.42;
-          viewCtx.drawImage(
-            mapSource,
-            Math.floor(localX * srcPerWorldX), Math.floor(localY * srcPerWorldY),
-            Math.ceil(localW * srcPerWorldX), Math.ceil(localH * srcPerWorldY),
-            Math.round(camera.x + ix * camera.scale), Math.round(camera.y + iy * camera.scale),
-            Math.round(localW * camera.scale), Math.round(localH * camera.scale)
-          );
-        }
+      const ix = Math.max(left, 0);
+      const iy = Math.max(top, 0);
+      const ix2 = Math.min(right, world.width);
+      const iy2 = Math.min(bottom, world.height);
+      if (ix < ix2 && iy < iy2) {
+        const localW = ix2 - ix;
+        const localH = iy2 - iy;
+        viewCtx.drawImage(
+          mapSource,
+          Math.floor(ix * srcPerWorldX), Math.floor(iy * srcPerWorldY),
+          Math.ceil(localW * srcPerWorldX), Math.ceil(localH * srcPerWorldY),
+          Math.round(camera.x + ix * camera.scale), Math.round(camera.y + iy * camera.scale),
+          Math.round(localW * camera.scale), Math.round(localH * camera.scale)
+        );
       }
-      viewCtx.globalAlpha = 1;
 
       viewCtx.strokeStyle = 'rgba(250, 204, 21, .9)';
       viewCtx.lineWidth = Math.max(2, 5 * camera.scale);
@@ -372,19 +412,6 @@
       viewCtx.restore();
     }
 
-    function drawSightMask(w, h, camera) {
-      const cx = w / 2;
-      const cy = h / 2;
-      const inner = camera.sightRadius * camera.scale * 0.62;
-      const outer = camera.sightRadius * camera.scale;
-      const mask = viewCtx.createRadialGradient(cx, cy, inner, cx, cy, outer);
-      mask.addColorStop(0, 'rgba(2, 6, 23, 0)');
-      mask.addColorStop(0.68, 'rgba(2, 6, 23, .16)');
-      mask.addColorStop(1, 'rgba(2, 6, 23, .72)');
-      viewCtx.fillStyle = mask;
-      viewCtx.fillRect(0, 0, w, h);
-    }
-
     function playerCells(p) {
       if (p?.cells?.length) return p.cells;
       return [{ id: p.id, x: p.x, y: p.y, radius: p.radius, mass: p.mass }];
@@ -393,6 +420,41 @@
     function largestCell(p) {
       const cells = playerCells(p);
       return cells.reduce((a, b) => (b.mass > a.mass ? b : a), cells[0]);
+    }
+
+    function viewSubject(p) {
+      const cells = playerCells(p);
+      if (!cells.length) return { x: p.x || 0, y: p.y || 0, radius: p.radius || 18 };
+      let largestRadius = 18;
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      for (const cell of cells) {
+        const r = Math.max(1, cell.radius || radiusFromMassFallback(cell.mass));
+        largestRadius = Math.max(largestRadius, r);
+        minX = Math.min(minX, cell.x - r);
+        minY = Math.min(minY, cell.y - r);
+        maxX = Math.max(maxX, cell.x + r);
+        maxY = Math.max(maxY, cell.y + r);
+      }
+      const x = (minX + maxX) / 2;
+      const y = (minY + maxY) / 2;
+      const spreadRadius = Math.max(maxX - minX, maxY - minY) / 2;
+      const radius = Math.max(largestRadius, largestRadius * 0.75 + spreadRadius * 0.45);
+      return { x, y, radius };
+    }
+
+    function radiusFromMassFallback(mass) {
+      return Math.max(9, 18 + Math.max(0, Math.sqrt(mass || 100) - 10) * 1.5);
+    }
+
+    function focusedCell(p) {
+      const cells = playerCells(p);
+      const focused = focusCellId ? cells.find(c => c.id === focusCellId) : null;
+      const cell = focused || largestCell(p);
+      if (!focused && cell) focusCellId = cell.id;
+      return cell;
     }
 
     function drawCell(ctx, player, cell, camera, opts = {}) {
@@ -407,6 +469,27 @@
         ctx.fill();
       }
       return { sp, sr };
+    }
+
+    function drawNameInsideCell(ctx, name, x, y, radius) {
+      const label = String(name || '').trim();
+      if (!label) return;
+      const maxWidth = radius * 1.55;
+      let fontSize = Math.max(6, Math.min(22, radius * 0.38));
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${fontSize}px sans-serif`;
+      while (fontSize > 6 && ctx.measureText(label).width > maxWidth) {
+        fontSize -= 1;
+        ctx.font = `900 ${fontSize}px sans-serif`;
+      }
+      ctx.lineWidth = Math.max(2, fontSize * 0.22);
+      ctx.strokeStyle = 'rgba(35,53,47,.72)';
+      ctx.fillStyle = '#fff';
+      ctx.strokeText(label, x, y);
+      ctx.fillText(label, x, y);
+      ctx.restore();
     }
 
     function drawSpItem(item, camera) {
@@ -454,10 +537,14 @@
     }
 
     function renderEffects(effects = []) {
-      effectPanel.innerHTML = effects.map(e => {
+      const html = effects.map(e => {
         const seconds = Math.ceil((e.remainingMs || 0) / 1000);
         return `<div class="effect-chip"><strong>${e.label}</strong><span>${seconds}s</span></div>`;
       }).join('');
+      if (html !== lastEffectsHtml) {
+        lastEffectsHtml = html;
+        effectPanel.innerHTML = html;
+      }
     }
 
     function showNotice(message, kind = 'info') {
@@ -488,18 +575,22 @@
       }
 
       const interpMe = interpPlayers.find(p => p.id === myId) || serverMe;
-      const lcInterp = largestCell(interpMe);
-      const lcServer = largestCell(serverMe);
+      const subjectInterp = viewSubject(interpMe);
+      const subjectServer = viewSubject(serverMe);
+      if (!subjectInterp || !subjectServer) {
+        requestAnimationFrame(renderViewport);
+        return;
+      }
 
       const nowTs = performance.now();
       const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
       lastFrameTs = nowTs;
-      if (!selfRender) selfRender = { x: lcInterp.x, y: lcInterp.y };
-      const dxs = lcServer.x - selfRender.x;
-      const dys = lcServer.y - selfRender.y;
+      if (!selfRender) selfRender = { x: subjectInterp.x, y: subjectInterp.y };
+      const dxs = subjectServer.x - selfRender.x;
+      const dys = subjectServer.y - selfRender.y;
       if (dxs * dxs + dys * dys > 300 * 300) {
-        selfRender.x = lcServer.x;
-        selfRender.y = lcServer.y;
+        selfRender.x = subjectServer.x;
+        selfRender.y = subjectServer.y;
       } else {
         const k = 1 - Math.pow(1 - 0.4, dt * 60);
         selfRender.x += dxs * k;
@@ -509,7 +600,7 @@
         ...interpMe,
         x: selfRender.x,
         y: selfRender.y,
-        radius: lcInterp.radius,
+        radius: subjectInterp.radius,
         mass: serverMe.mass,
       };
 
@@ -521,7 +612,7 @@
         const p = worldToScreen(r.x, r.y, camera);
         const rr = Math.max(7, r.radius * camera.scale);
         if (GameSprites.isReady()) {
-          GameSprites.drawResourceScreen(viewCtx, r, p.x, p.y, rr);
+          GameSprites.drawResourceScreen(viewCtx, r, p.x, p.y, rr, { lite: true });
         } else {
           viewCtx.beginPath();
           viewCtx.fillStyle = r.color;
@@ -565,62 +656,27 @@
       const others = interpPlayers.filter(p => p.id !== myId && p.alive);
       for (const p of others) {
         const cells = playerCells(p).slice().sort((a, b) => a.radius - b.radius);
-        let drewName = false;
         for (const cell of cells) {
           if (!isNearSight(cell, me, camera, cell.radius)) continue;
           const { sp, sr } = drawCell(viewCtx, p, cell, camera);
-          if (!drewName) {
-            viewCtx.font = '700 11px sans-serif';
-            viewCtx.textAlign = 'center';
-            viewCtx.fillStyle = '#fff';
-            viewCtx.strokeStyle = 'rgba(0,0,0,.7)';
-            viewCtx.lineWidth = 3;
-            viewCtx.strokeText(p.name, sp.x, sp.y - sr - 7);
-            viewCtx.fillText(p.name, sp.x, sp.y - sr - 7);
-            drewName = true;
-          }
+          drawNameInsideCell(viewCtx, p.name, sp.x, sp.y, sr);
         }
       }
 
       if (me.alive) {
         const myCells = playerCells(interpMe).slice().sort((a, b) => a.radius - b.radius);
-        let labelCell = null;
-        let labelPos = null;
         for (const cell of myCells) {
           const { sp, sr } = drawCell(viewCtx, me, cell, camera, { highlight: true });
-          if (!labelCell || cell.mass >= labelCell.mass) {
-            labelCell = cell;
-            labelPos = { sp, sr };
-          }
-        }
-        if (labelPos) {
-          const { sp, sr } = labelPos;
-          viewCtx.font = '900 12px sans-serif';
-          viewCtx.textAlign = 'center';
-          viewCtx.fillStyle = '#fff';
-          viewCtx.strokeStyle = 'rgba(0,0,0,.75)';
-          viewCtx.lineWidth = 3;
-          viewCtx.strokeText('Bạn', sp.x, sp.y - sr - 8);
-          viewCtx.fillText('Bạn', sp.x, sp.y - sr - 8);
-
-          const massLabel = `Quy mô: ${Math.round(me.mass)}`;
-          const massY = sp.y + sr + Math.max(12, sr * 0.28);
-          viewCtx.font = `900 ${Math.max(12, sr * 0.34)}px sans-serif`;
-          viewCtx.fillStyle = '#23352F';
-          viewCtx.strokeStyle = 'rgba(255,255,255,.92)';
-          viewCtx.lineWidth = 3;
-          viewCtx.strokeText(massLabel, sp.x, massY);
-          viewCtx.fillText(massLabel, sp.x, massY);
+          drawNameInsideCell(viewCtx, me.name, sp.x, sp.y, sr);
         }
       }
 
-
-      drawSightMask(w, h, camera);
       requestAnimationFrame(renderViewport);
     }
 
     let joystickActive = false;
     let joystickDir = { x: 0, y: 0 };
+    let canvasPointerActive = false;
     let mouseClient = { x: 0, y: 0 };
     const preferMouse = !window.matchMedia('(pointer: coarse)').matches;
     let controlTimer = null;
@@ -630,7 +686,7 @@
     function cameraMe() {
       const serverMe = state?.players?.find(p => p.id === myId);
       if (!serverMe) return null;
-      const lc = largestCell(serverMe);
+      const lc = viewSubject(serverMe);
       return {
         x: selfRender?.x ?? lc.x,
         y: selfRender?.y ?? lc.y,
@@ -692,11 +748,13 @@
     }
 
     function joystickCenter() {
+      if (!joystick) return { x: 0, y: 0 };
       const r = joystick.getBoundingClientRect();
       return { x: r.width / 2, y: r.height / 2 };
     }
 
     function setKnob(dx, dy) {
+      if (!joystick || !knob) return;
       const max = Math.max(32, joystick.clientWidth / 2 - knob.offsetWidth / 2 - 4);
       const len = Math.hypot(dx, dy);
       const k = len > max ? max / len : 1;
@@ -709,7 +767,7 @@
     }
 
     function resetKnob() {
-      knob.style.transform = 'translate(0px, 0px)';
+      if (knob) knob.style.transform = 'translate(0px, 0px)';
       joystickDir = { x: 0, y: 0 };
       joystickActive = false;
       const me = cameraMe();
@@ -717,6 +775,7 @@
     }
 
     function pointerPos(e) {
+      if (!joystick) return { x: 0, y: 0 };
       const r = joystick.getBoundingClientRect();
       return { x: e.clientX - r.left, y: e.clientY - r.top };
     }
@@ -725,6 +784,7 @@
       if (!myId) return;
       e.preventDefault();
       joystickActive = true;
+      if (!joystick) return;
       joystick.setPointerCapture(e.pointerId);
       const p = pointerPos(e);
       const c = joystickCenter();
@@ -742,19 +802,48 @@
     function onJoystickEnd(e) {
       if (!joystickActive) return;
       e.preventDefault();
-      if (joystick.hasPointerCapture(e.pointerId)) joystick.releasePointerCapture(e.pointerId);
+      if (joystick?.hasPointerCapture(e.pointerId)) joystick.releasePointerCapture(e.pointerId);
       resetKnob();
     }
 
-    joystick.addEventListener('pointerdown', onJoystickStart);
-    joystick.addEventListener('pointermove', onJoystickMove);
-    joystick.addEventListener('pointerup', onJoystickEnd);
-    joystick.addEventListener('pointercancel', onJoystickEnd);
-    joystick.addEventListener('lostpointercapture', () => { if (joystickActive) resetKnob(); });
+    if (joystick) {
+      joystick.addEventListener('pointerdown', onJoystickStart);
+      joystick.addEventListener('pointermove', onJoystickMove);
+      joystick.addEventListener('pointerup', onJoystickEnd);
+      joystick.addEventListener('pointercancel', onJoystickEnd);
+      joystick.addEventListener('lostpointercapture', () => { if (joystickActive) resetKnob(); });
+    }
 
     document.addEventListener('mousemove', e => {
       mouseClient.x = e.clientX;
       mouseClient.y = e.clientY;
+    });
+
+    function moveByCanvasPointer(e) {
+      if (!myId) return;
+      mouseClient.x = e.clientX;
+      mouseClient.y = e.clientY;
+      const target = screenToWorld(e.clientX, e.clientY);
+      if (target) emitControlTarget(target.x, target.y);
+    }
+
+    viewCanvas.addEventListener('pointerdown', e => {
+      if (!myId) return;
+      if (e.pointerType === 'mouse') return;
+      canvasPointerActive = true;
+      viewCanvas.setPointerCapture(e.pointerId);
+      moveByCanvasPointer(e);
+    });
+    viewCanvas.addEventListener('pointermove', e => {
+      if (canvasPointerActive) moveByCanvasPointer(e);
+    });
+    viewCanvas.addEventListener('pointerup', e => {
+      canvasPointerActive = false;
+      if (viewCanvas.hasPointerCapture(e.pointerId)) viewCanvas.releasePointerCapture(e.pointerId);
+    });
+    viewCanvas.addEventListener('pointercancel', e => {
+      canvasPointerActive = false;
+      if (viewCanvas.hasPointerCapture(e.pointerId)) viewCanvas.releasePointerCapture(e.pointerId);
     });
 
     window.addEventListener('keydown', e => {
@@ -767,9 +856,6 @@
         emitAction('eject');
       }
     });
-
-    document.getElementById('btnSplit').addEventListener('click', () => emitAction('split'));
-    document.getElementById('btnEject').addEventListener('click', () => emitAction('eject'));
 
     document.querySelectorAll('[data-vote]').forEach(btn => {
       btn.addEventListener('click', () => {

@@ -132,7 +132,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-  <script src="/game-sprites.js"></script>
+  <script src="/game-sprites.js?v=20260711-4"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -410,17 +410,15 @@
     function drawInfrastructure(i) {
       if (state.phase < 2) return;
       const p = worldToScreen(i.x, i.y);
-      const screenR = Math.max(12, i.radius * camera.scale * 0.9);
+      const screenR = Math.max(10, i.radius * camera.scale * 0.72);
       ctx.save();
-      ctx.translate(p.x, p.y);
-      ctx.scale(1 / camera.scale, 1 / camera.scale);
       const glow = i.type === 'electricity' ? 'rgba(242,201,76,.45)' : 'rgba(114,183,201,.45)';
       ctx.beginPath();
       ctx.fillStyle = glow;
-      ctx.arc(0, 0, i.radius + 12, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, screenR + 4, 0, Math.PI * 2);
       ctx.fill();
       if (GameSprites.isReady()) {
-        GameSprites.drawInfrastructure(ctx, i, 0, 0, i.radius);
+        GameSprites.drawInfrastructure(ctx, i, p.x, p.y, screenR);
       }
       ctx.restore();
     }
@@ -430,9 +428,29 @@
       return [{ x: p.x, y: p.y, radius: p.radius, mass: p.mass }];
     }
 
+    function drawNameInsideCell(name, x, y, radius) {
+      const label = String(name || '').trim();
+      if (!label) return;
+      const maxWidth = radius * 1.55;
+      let fontSize = Math.max(6, Math.min(20, radius * 0.42));
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `900 ${fontSize}px sans-serif`;
+      while (fontSize > 6 && ctx.measureText(label).width > maxWidth) {
+        fontSize -= 1;
+        ctx.font = `900 ${fontSize}px sans-serif`;
+      }
+      ctx.fillStyle = '#fff';
+      ctx.strokeStyle = 'rgba(35,53,47,.72)';
+      ctx.lineWidth = Math.max(2, fontSize * 0.22);
+      ctx.strokeText(label, x, y);
+      ctx.fillText(label, x, y);
+      ctx.restore();
+    }
+
     function drawPlayer(p) {
       const cells = playerCells(p);
-      const labelCell = cells.reduce((a, b) => (b.mass > a.mass ? b : a), cells[0]);
 
       for (const cell of cells) {
         const pos = worldToScreen(cell.x, cell.y);
@@ -460,33 +478,8 @@
           ctx.arc(pos.x, pos.y, screenR, 0, Math.PI * 2);
           ctx.fill();
         }
+        drawNameInsideCell(p.name, pos.x, pos.y, screenR);
       }
-
-      const pos = worldToScreen(labelCell.x, labelCell.y);
-      const screenR = Math.max(6, labelCell.radius * camera.scale * PROJECTOR_SCALE);
-
-      ctx.save();
-      const nameSize = Math.max(13, screenR * 0.42);
-      ctx.font = `900 ${nameSize}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'alphabetic';
-      ctx.fillStyle = '#f4faf6';
-      ctx.strokeStyle = 'rgba(35,53,47,.9)';
-      ctx.lineWidth = 4;
-      const labelY = pos.y - screenR - Math.max(8, screenR * 0.18);
-      ctx.strokeText(p.name, pos.x, labelY);
-      ctx.fillText(p.name, pos.x, labelY);
-
-      const massSize = Math.max(11, screenR * 0.32);
-      ctx.font = `700 ${massSize}px sans-serif`;
-      ctx.fillStyle = '#f4faf6';
-      ctx.strokeStyle = 'rgba(35,53,47,.9)';
-      ctx.lineWidth = 3;
-      const massY = pos.y + screenR + Math.max(12, massSize * 0.9);
-      const massLabel = `Quy mô: ${Math.round(p.mass)}`;
-      ctx.strokeText(massLabel, pos.x, massY);
-      ctx.fillText(massLabel, pos.x, massY);
-      ctx.restore();
     }
 
     function drawEjected(e) {
@@ -587,7 +580,7 @@
       document.getElementById('leaderboard').innerHTML = state.leaderboard.map(p => `
         <div class="leader-row">
           <span>#${p.rank}</span>
-          <span><i class="sprite-chip logo-chip" data-sheet="logos" data-idx="${p.logoIndex ?? 0}"></i>${p.name}</span>
+          <span><i class="dot" style="background:${p.color}"></i>${p.name}</span>
           <strong>${p.share}%</strong>
         </div>
       `).join('') || '<div style="font-size:13px;color:var(--hc-text-muted)">Chưa có doanh nghiệp.</div>';

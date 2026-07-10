@@ -22,7 +22,7 @@ app.get('/player', (_req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-const WORLD = { width: 4096, height: 2304 };
+const WORLD = { width: 6144, height: 3456 };
 const TICK_RATE = 30;
 const TICK_MS = 1000 / TICK_RATE;
 const OGAR_TICK_MS = 40;
@@ -41,11 +41,13 @@ const MONOPOLY_SHARE_WARNING = 0.45;
 const MONOPOLY_SHARE_DANGER = 0.65;
 const RESOURCE_SYNC_EVERY = 3;
 
-const MAX_CELLS = 4;
+const MAX_CELLS = 8;
 const MIN_SPLIT_MASS = 200;
 const SPLIT_COOLDOWN_MS = 0;
 const MERGE_BASE_MS = 30000;
 const COLLISION_RESTORE_TICKS = 15;
+const OWN_CELL_COLLISION_ITERATIONS = 3;
+const OWN_CELL_COLLISION_PADDING = 1.5;
 const MIN_EJECT_MASS = 100;
 const EJECT_COST = 14;
 const EJECT_GIVE = 12;
@@ -67,6 +69,12 @@ const RESPAWN_BUFF_MS = 10 * 1000;
 const EFFECT_MS = 15 * 1000;
 
 const round1 = (n) => Math.round(n * 10) / 10;
+const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
+
+function safeColor(color, fallback) {
+  const value = String(color || '').trim();
+  return HEX_COLOR_RE.test(value) ? value.toUpperCase() : fallback;
+}
 
 const resourceTypes = [
   { type: 'capital', label: 'Vốn', value: 2.2, color: '#f6c85f', weight: 0.38 },
@@ -109,6 +117,7 @@ function createGame(opts = {}) {
     gameStarted: false,
     gameEnded: false,
     startedAt: null,
+    manualPhaseOverride: false,
     sessionDurationMs: MATCH_DURATION_MS,
     customJoinUrl: opts.customJoinUrl || null,
     players: {},
@@ -189,6 +198,7 @@ function phaseForElapsed(ms) {
 
 function updatePhaseByTime() {
   if (!game.gameStarted) return;
+  if (game.manualPhaseOverride) return;
   const next = phaseForElapsed(elapsedMs());
   if (game.phase !== next.phase) {
     game.phase = next.phase;
@@ -457,6 +467,19 @@ function largestCell(p) {
   return p.cells.reduce((a, b) => (b.mass > a.mass ? b : a), p.cells[0]);
 }
 
+function enforceMaxCells(p) {
+  if (!p?.cells || p.cells.length <= MAX_CELLS) return;
+  const sorted = p.cells.slice().sort((a, b) => b.mass - a.mass);
+  const keep = sorted.slice(0, MAX_CELLS);
+  const overflow = sorted.slice(MAX_CELLS);
+  const target = keep[0];
+  for (const cell of overflow) {
+    target.mass += cell.mass;
+  }
+  p.cells = keep;
+  syncLegacyFields(p);
+}
+
 function centroid(p) {
   const m = totalMass(p) || 1;
   let x = 0;
@@ -496,10 +519,11 @@ function makeCell(ownerId, x, y, mass = PLAYER_START_MASS) {
   };
 }
 
-function createPlayer(socketId, name, logoIndex = 0) {
+function createPlayer(socketId, name, logoIndex = 0, color = null) {
   const spawn = randomSpawn();
   const index = Object.keys(game.players).length;
   const safeLogo = Number.isInteger(logoIndex) ? Math.max(0, Math.min(LOGO_COUNT - 1, logoIndex)) : 0;
+  const fallbackColor = palette[index % palette.length];
   const p = {
     id: socketId,
     name: safeName(name),
@@ -514,7 +538,7 @@ function createPlayer(socketId, name, logoIndex = 0) {
     score: PLAYER_START_MASS,
     swallowed: 0,
     swallowedBy: 0,
-    color: palette[index % palette.length],
+    color: safeColor(color, fallbackColor),
     alive: true,
     respawnAt: 0,
     joinedAt: Date.now(),
@@ -544,6 +568,7 @@ function clampCell(cell) {
 
 function splitPlayer(p) {
   const now = Date.now();
+  enforceMaxCells(p);
   if (SPLIT_COOLDOWN_MS && now - p.lastSplitAt < SPLIT_COOLDOWN_MS) return;
   if (p.cells.length >= MAX_CELLS) return;
 
@@ -575,6 +600,7 @@ function splitPlayer(p) {
   }
 
   if (splitCount > 0) p.lastSplitAt = now;
+  enforceMaxCells(p);
   syncLegacyFields(p);
 }
 
@@ -665,6 +691,65 @@ function updateCells(p) {
     clampCell(cell);
   }
   syncLegacyFields(p);
+}
+
+function resolveOwnCellCollisions(p) {
+  const now = Date.now();
+  if (p.cells.length < 2) return;
+
+  for (let pass = 0; pass < OWN_CELL_COLLISION_ITERATIONS; pass++) {
+    let moved = false;
+    for (let i = 0; i < p.cells.length; i++) {
+      for (let j = i + 1; j < p.cells.length; j++) {
+        const a = p.cells[i];
+        const b = p.cells[j];
+        if (now >= a.canMergeAt && now >= b.canMergeAt) continue;
+
+        const ra = radiusFromMass(a.mass);
+        const rb = radiusFromMass(b.mass);
+        const minDist = ra + rb + OWN_CELL_COLLISION_PADDING;
+        let dx = b.x - a.x;
+        let dy = b.y - a.y;
+        let dist = Math.hypot(dx, dy);
+
+        if (dist >= minDist) continue;
+        if (dist < 0.001) {
+          const angle = ((i * 131 + j * 73) % 360) * Math.PI / 180;
+          dx = Math.cos(angle);
+          dy = Math.sin(angle);
+          dist = 1;
+        }
+
+        const nx = dx / dist;
+        const ny = dy / dist;
+        const overlap = minDist - dist;
+        const totalMass = a.mass + b.mass || 1;
+        const pushA = overlap * (b.mass / totalMass);
+        const pushB = overlap * (a.mass / totalMass);
+
+        a.x -= nx * pushA;
+        a.y -= ny * pushA;
+        b.x += nx * pushB;
+        b.y += ny * pushB;
+
+        const relVx = b.vx - a.vx;
+        const relVy = b.vy - a.vy;
+        const closingSpeed = relVx * nx + relVy * ny;
+        if (closingSpeed < 0) {
+          const damp = closingSpeed * 0.5;
+          a.vx += nx * damp * (b.mass / totalMass);
+          a.vy += ny * damp * (b.mass / totalMass);
+          b.vx -= nx * damp * (a.mass / totalMass);
+          b.vy -= ny * damp * (a.mass / totalMass);
+        }
+
+        clampCell(a);
+        clampCell(b);
+        moved = true;
+      }
+    }
+    if (!moved) break;
+  }
 }
 
 function updateEjected() {
@@ -934,8 +1019,10 @@ function updatePlayer(p) {
     killPlayer(p);
     return;
   }
+  enforceMaxCells(p);
 
   updateCells(p);
+  resolveOwnCellCollisions(p);
   collectResources(p);
   collectSpItems(p);
   collectPointBags(p);
@@ -944,6 +1031,7 @@ function updatePlayer(p) {
 }
 
 function nextPhase() {
+  game.manualPhaseOverride = true;
   if (game.phase < 5) game.phase += 1;
   else game.phase = 1;
   const names = {
@@ -1233,8 +1321,8 @@ io.on('connection', (socket) => {
     world: WORLD,
   });
 
-  socket.on('joinGame', ({ name, logoIndex }) => {
-    game.players[socket.id] = createPlayer(socket.id, name, logoIndex);
+  socket.on('joinGame', ({ name, logoIndex, color }) => {
+    game.players[socket.id] = createPlayer(socket.id, name, logoIndex, color);
     addEvent(`${game.players[socket.id].name} gia nhập thị trường`, 'info');
     socket.emit('joined', { id: socket.id, player: serializePlayer(game.players[socket.id]), world: WORLD });
   });
@@ -1280,6 +1368,7 @@ io.on('connection', (socket) => {
         game.running = true;
         game.gameEnded = false;
         game.startedAt = Date.now();
+        game.manualPhaseOverride = false;
         game.resources = generateResources();
         game.ejected = [];
         addEvent('Trò chơi chính thức bắt đầu!', 'phase');
@@ -1305,7 +1394,7 @@ io.on('connection', (socket) => {
       const oldPlayers = Object.values(game.players).map(p => ({ id: p.id, name: p.name, color: p.color, logoIndex: p.logoIndex }));
       game = createGame({ customJoinUrl });
       for (const old of oldPlayers) {
-        game.players[old.id] = { ...createPlayer(old.id, old.name, old.logoIndex), color: old.color };
+        game.players[old.id] = createPlayer(old.id, old.name, old.logoIndex, old.color);
       }
       addEvent('Đã chơi lại từ đầu — đang chờ bắt đầu', 'warn');
     }
