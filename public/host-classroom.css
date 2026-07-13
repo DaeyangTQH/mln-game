@@ -28,6 +28,44 @@ body.host-classroom {
   overflow: hidden;
 }
 
+.host-classroom.host-auth-pending .hc-layout { visibility: hidden; pointer-events: none; }
+.host-classroom .host-auth-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(123,163,146,.3), transparent 34%),
+    linear-gradient(135deg, #e7f2dd, #f6faf1 55%, #dcebd9);
+}
+.host-classroom .host-auth-card {
+  width: min(460px, 100%);
+  padding: 34px;
+  border: 1px solid var(--hc-border);
+  border-radius: 24px;
+  background: rgba(255,255,255,.95);
+  box-shadow: 0 24px 70px rgba(35,53,47,.2);
+  text-align: center;
+}
+.host-classroom .host-auth-icon { font-size: 44px; }
+.host-classroom .host-auth-card h1 { margin: 10px 0 8px; font-size: 28px; }
+.host-classroom .host-auth-card p { margin: 0 0 22px; color: var(--hc-text-sub); }
+.host-classroom .host-auth-card form { display: grid; gap: 10px; }
+.host-classroom .host-auth-card input {
+  width: 100%;
+  padding: 13px 15px;
+  border: 1px solid var(--hc-border);
+  border-radius: 12px;
+  outline: none;
+  font: inherit;
+  text-align: center;
+}
+.host-classroom .host-auth-card input:focus { border-color: var(--hc-accent); box-shadow: 0 0 0 3px rgba(123,163,146,.18); }
+.host-classroom .host-auth-card form button { padding: 13px 18px; font-size: 15px; }
+.host-classroom .host-player-link { display: inline-block; margin-top: 18px; color: #527867; font-weight: 700; }
+
 .host-classroom * { box-sizing: border-box; }
 
 .host-classroom button {

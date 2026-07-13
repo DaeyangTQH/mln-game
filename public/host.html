@@ -6,7 +6,19 @@
   <title>Nuốt Thị Trường — Màn hình lớp học</title>
   <link rel="stylesheet" href="/host-classroom.css" />
 </head>
-<body class="host-classroom" id="hostBody">
+<body class="host-classroom host-auth-pending" id="hostBody">
+  <section class="host-auth-gate" id="hostAuthGate">
+    <div class="host-auth-card">
+      <div class="host-auth-icon">🔐</div>
+      <h1 id="hostAuthTitle">Xác thực máy Host</h1>
+      <p id="hostAuthMessage">Nhập mã PIN của giáo viên để nhận quyền điều khiển phòng chơi.</p>
+      <form id="hostAuthForm" autocomplete="off">
+        <input id="hostPinInput" type="password" inputmode="numeric" maxlength="32" placeholder="Mã PIN Host" />
+        <button type="submit" class="btn-primary">Nhận quyền Host</button>
+      </form>
+      <a href="/player" class="host-player-link">Vào trang người chơi</a>
+    </div>
+  </section>
   <div class="hc-layout" id="hostLayout">
     <header class="hc-topbar" id="hostTopbar">
       <div class="hc-brand">Nuốt Thị Trường</div>
@@ -35,6 +47,7 @@
         <button type="button" class="btn-primary btn-md" id="dropSpItem">Thả SP Item</button>
         <button type="button" class="btn-secondary btn-sm" id="pause">Tạm dừng</button>
         <button type="button" class="btn-warn btn-sm" id="reset">Chơi lại</button>
+        <button type="button" class="btn-ghost btn-sm" id="releaseHost">Rời Host</button>
         <div class="hc-settings">
           <button type="button" class="btn-ghost btn-sm" id="settingsBtn">Cài đặt hiển thị ▾</button>
           <div class="hc-settings-menu" id="settingsMenu">
@@ -104,7 +117,7 @@
 
     <section class="hc-vote hide" id="votePanel">
       <div class="hc-card-title">Bình chọn chính sách</div>
-      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Nhà nước có nên can thiệp khi điện/nước bị một doanh nghiệp kiểm soát?</div>
+      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Nhà nước có nên can thiệp khi một doanh nghiệp chi phối thị trường?</div>
       <div class="vote-bar"><span>A</span><div class="vote-track"><div class="vote-fill" id="voteA"></div></div><span id="voteACount">0</span></div>
       <div class="vote-bar"><span>B</span><div class="vote-track"><div class="vote-fill" id="voteB"></div></div><span id="voteBCount">0</span></div>
       <div class="vote-bar"><span>C</span><div class="vote-track"><div class="vote-fill" id="voteC"></div></div><span id="voteCCount">0</span></div>
@@ -118,6 +131,86 @@
   <script>
     const socket = io();
     const hostBody = document.getElementById('hostBody');
+    const HOST_TOKEN_KEY = 'mlnGameHostDeviceToken';
+    const hostAuthGate = document.getElementById('hostAuthGate');
+    const hostAuthForm = document.getElementById('hostAuthForm');
+    const hostPinInput = document.getElementById('hostPinInput');
+    const hostAuthTitle = document.getElementById('hostAuthTitle');
+    const hostAuthMessage = document.getElementById('hostAuthMessage');
+    let hostAuthorized = false;
+
+    function showHostGate(title, message, allowClaim = false) {
+      hostAuthorized = false;
+      hostBody.classList.add('host-auth-pending');
+      hostAuthGate.classList.remove('hide');
+      hostAuthTitle.textContent = title;
+      hostAuthMessage.textContent = message;
+      hostAuthForm.classList.toggle('hide', !allowClaim);
+      if (allowClaim) setTimeout(() => hostPinInput.focus(), 0);
+    }
+
+    socket.on('connect', () => {
+      const deviceToken = localStorage.getItem(HOST_TOKEN_KEY);
+      if (deviceToken) {
+        showHostGate('Đang khôi phục quyền Host', 'Đang xác minh thiết bị này...', false);
+        socket.emit('host:resume', { deviceToken });
+      } else {
+        socket.emit('host:status');
+      }
+    });
+
+    socket.on('host:status', ({ status }) => {
+      if (status === 'available') {
+        showHostGate('Xác thực máy Host', 'Nhập mã PIN của giáo viên để nhận quyền điều khiển phòng chơi.', true);
+      } else {
+        showHostGate('Host đang được sử dụng', 'Một thiết bị khác đang điều khiển phòng chơi. Bạn vẫn có thể tham gia bằng trang người chơi.', false);
+      }
+    });
+
+    socket.on('host:token', ({ deviceToken }) => {
+      if (deviceToken) localStorage.setItem(HOST_TOKEN_KEY, deviceToken);
+    });
+
+    socket.on('host:authorized', () => {
+      hostAuthorized = true;
+      hostBody.classList.remove('host-auth-pending');
+      hostAuthGate.classList.add('hide');
+      requestAnimationFrame(resize);
+    });
+
+    socket.on('host:denied', ({ code, message } = {}) => {
+      if (code === 'TOKEN_EXPIRED') localStorage.removeItem(HOST_TOKEN_KEY);
+      const canClaim = code === 'INVALID_PIN' || code === 'TOKEN_EXPIRED';
+      showHostGate(
+        code === 'HOST_OCCUPIED' ? 'Host đang được sử dụng' : 'Không thể nhận quyền Host',
+        message || 'Bạn không có quyền Host.',
+        canClaim,
+      );
+    });
+
+    socket.on('host:released', () => {
+      localStorage.removeItem(HOST_TOKEN_KEY);
+      showHostGate('Đã rời quyền Host', 'Thiết bị khác hiện có thể nhận quyền Host. Nhập PIN nếu bạn muốn kết nối lại.', true);
+    });
+
+    socket.on('host:availability', ({ available }) => {
+      if (hostAuthorized) return;
+      if (available) {
+        showHostGate('Host đang trống', 'Nhập mã PIN của giáo viên để nhận quyền điều khiển phòng chơi.', true);
+      } else if (!localStorage.getItem(HOST_TOKEN_KEY)) {
+        showHostGate('Host đang được sử dụng', 'Một thiết bị khác đang điều khiển phòng chơi. Bạn vẫn có thể tham gia bằng trang người chơi.', false);
+      }
+    });
+
+    hostAuthForm.addEventListener('submit', event => {
+      event.preventDefault();
+      const pin = hostPinInput.value.trim();
+      if (!pin) return;
+      hostAuthMessage.textContent = 'Đang xác minh mã PIN...';
+      socket.emit('host:claim', { pin });
+      hostPinInput.value = '';
+    });
+
     const hostLayout = document.getElementById('hostLayout');
     const hostStage = document.getElementById('hostStage');
     const canvas = document.getElementById('gameCanvas');
@@ -146,7 +239,7 @@
         ],
       },
       2: {
-        short: 'Giai đoạn 2: Chiếm cứ điểm — người chơi kiểm soát các vị trí chiến lược để gia tăng thị phần.',
+        short: 'Giai đoạn 2: Tích tụ tư bản — người chơi mở rộng quy mô, thâu tóm và kiểm soát các cứ điểm chiến lược.',
         flow: 'Tích tụ vốn → Chiếm cứ điểm → Bảo vệ vị trí → Gia tăng thị phần',
         cards: [
           { title: 'Vốn', sub: 'Tích tụ tư bản', sheet: 'policy', index: 14 },
@@ -177,17 +270,7 @@
     };
 
     PHASE_EXPLAIN[4] = {
-      short: 'Giai đoạn 4: Chuyển tiếp điều tiết — thị trường vẫn cạnh tranh nhưng luật chống độc quyền bắt đầu tạo áp lực rõ hơn.',
-      flow: 'Độc quyền → Giám sát → Phân phối lại nguồn lực → Chuẩn bị điều tiết mạnh',
-      cards: [
-        { title: 'Giám sát', sub: 'Theo dõi top 1', sheet: 'policy', index: 6 },
-        { title: 'Túi điểm', sub: 'Nguồn lực được phân phối lại', sheet: 'policy', index: 14 },
-        { title: 'SP Item', sub: 'Cơ hội đảo chiều', sheet: 'icons', index: 2 },
-      ],
-    };
-
-    PHASE_EXPLAIN[5] = {
-      short: 'Giai đoạn 5: Độc quyền nhà nước — Nhà nước can thiệp mạnh hơn để hạn chế top 1 snowball và mở cơ hội comeback.',
+      short: 'Giai đoạn 4: Độc quyền nhà nước — Nhà nước can thiệp mạnh để hạn chế doanh nghiệp dẫn đầu và tạo cơ hội trở lại.',
       flow: 'Độc quyền → Điều tiết nhà nước → Chống độc quyền → Cân bằng thị trường',
       cards: [
         { title: 'Luật chống độc quyền', sub: 'Kiềm chế doanh nghiệp quá lớn', sheet: 'policy', index: 6 },
@@ -576,7 +659,7 @@
       `).join('');
 
       const vp = document.getElementById('votePanel');
-      const showVote = state.phase === 5 && panelState.vote && state.gameStarted;
+      const showVote = state.phase === 4 && panelState.vote && state.gameStarted;
       vp.classList.toggle('hide', !showVote);
       const total = Math.max(1, state.voteCounts.A + state.voteCounts.B + state.voteCounts.C);
       ['A', 'B', 'C'].forEach(k => {
@@ -624,6 +707,10 @@
         socket.emit('hostAction', 'reset');
         document.getElementById('explainDetail').classList.remove('open');
       }
+    };
+    document.getElementById('releaseHost').onclick = () => {
+      if (!hostAuthorized || !confirm('Bạn có chắc muốn rời quyền Host không?')) return;
+      socket.emit('host:release', { deviceToken: localStorage.getItem(HOST_TOKEN_KEY) });
     };
 
     document.getElementById('joinUrl').onclick = () => {

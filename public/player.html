@@ -294,7 +294,7 @@
         lastPlayerUiUpdate = now;
         const me = state.players.find(p => p.id === myId);
         document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
-        voteButtons.classList.toggle('hide', state.phase !== 5);
+        voteButtons.classList.toggle('hide', state.phase !== 4);
         if (me) {
           document.getElementById('massDisplay').textContent = Math.round(me.score);
           viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
