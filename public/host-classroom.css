@@ -316,7 +316,14 @@ body.host-classroom {
 .host-classroom .mono-high { color: #d4923a; }
 .host-classroom .mono-very { color: var(--hc-warn); }
 
-.host-classroom .leaderboard { overflow-y: auto; max-height: 140px; }
+.host-classroom .leaderboard {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  max-height: none;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
 .host-classroom .leader-row {
   display: grid;
   grid-template-columns: 28px 1fr auto;

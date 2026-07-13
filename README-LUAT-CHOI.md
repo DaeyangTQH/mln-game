@@ -189,8 +189,7 @@ Rule trong source:
 
 Từ phase 2 trở đi, có 2 hạ tầng trên bản đồ:
 
-- Lưới điện.
-- Đường ống nước.
+- Bốn cứ điểm chiến lược trên bản đồ.
 
 Người chơi đứng gần hạ tầng với quy mô đủ lớn có thể chiếm quyền kiểm soát.
 
