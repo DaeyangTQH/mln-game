@@ -223,6 +223,17 @@ body.host-classroom {
   box-shadow: 0 12px 30px rgba(35, 53, 47, .22);
 }
 
+.host-classroom .hc-toast.capture { background:linear-gradient(135deg,#991b1b,#ef4444); animation:capture-toast-in .3s ease-out; }
+@keyframes capture-toast-in { from { opacity:0; transform:translate(-50%,-16px) scale(.94); } to { opacity:1; transform:translate(-50%,0) scale(1); } }
+.host-classroom .capture-hud { position:absolute; z-index:8; top:12px; left:12px; right:12px; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; pointer-events:none; }
+.host-classroom .capture-hud-item { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:0 7px; padding:7px 9px; border:2px solid var(--point-color); border-radius:12px; background:rgba(15,23,42,.82); color:#fff; }
+.host-classroom .capture-hud-item > span { grid-row:1 / 3; font-size:22px; color:var(--point-color); }
+.host-classroom .capture-hud-item strong { overflow:hidden; font-size:12px; text-overflow:ellipsis; white-space:nowrap; }
+.host-classroom .capture-hud-item small { color:#cbd5e1; font-size:10px; }
+.host-classroom .capture-hud-item.capturing { border-color:var(--point-color); }
+.host-classroom .capture-hud-item.contested { border-color:#ef4444; animation:capture-pulse .65s infinite alternate; }
+@keyframes capture-pulse { to { box-shadow:0 0 22px rgba(239,68,68,.9); } }
+
 .host-classroom .hc-lobby-overlay {
   position: absolute;
   inset: 0;

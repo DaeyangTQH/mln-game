@@ -52,6 +52,7 @@
       <div class="hc-map-frame" id="hostStage">
         <canvas id="gameCanvas"></canvas>
         <div class="hc-toast hide" id="hostToast"></div>
+        <div class="capture-hud" id="hostCaptureHud"></div>
         <div class="hc-lobby-overlay" id="lobbyOverlay">
           <div>
             <h2>Đang chờ người chơi…</h2>
@@ -76,26 +77,6 @@
             <div class="hc-metric full">
               <div class="m-label">Doanh nghiệp dẫn đầu</div>
               <div class="m-value sm" id="metricLeader">—</div>
-            </div>
-            <div class="hc-metric">
-              <div class="m-label">Mức độc quyền</div>
-              <div class="m-value" id="monopolyLevel">Thấp</div>
-            </div>
-            <div class="hc-metric">
-              <div class="m-label">Giá dịch vụ</div>
-              <div class="m-value" id="priceIndex">100</div>
-            </div>
-            <div class="hc-metric">
-              <div class="m-label">Hài lòng người dân</div>
-              <div class="m-value" id="happiness">100</div>
-            </div>
-            <div class="hc-metric full">
-              <div class="m-label">Lưới điện</div>
-              <div class="m-value sm" id="gridOwner">chưa ai</div>
-            </div>
-            <div class="hc-metric full">
-              <div class="m-label">Đường ống nước</div>
-              <div class="m-value sm" id="pipeOwner">chưa ai</div>
             </div>
           </div>
         </div>
@@ -217,7 +198,6 @@
     };
 
     const panelState = { topbar: true, sidebar: true, bottom: true, vote: true };
-    const monoClass = { 'Thấp': 'mono-low', 'Trung bình': 'mono-mid', 'Cao': 'mono-high', 'Rất cao': 'mono-very' };
 
     function formatTime(ms) {
       const total = Math.max(0, Math.floor(ms / 1000));
@@ -423,6 +403,31 @@
       ctx.restore();
     }
 
+    function drawCapturePoint(point) {
+      const p = worldToScreen(point.x, point.y);
+      const radius = Math.max(24, point.radius * camera.scale);
+      const color = point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8';
+      ctx.save();
+      ctx.beginPath(); ctx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      ctx.fillStyle = `${color}33`; ctx.fill();
+      ctx.strokeStyle = color; ctx.lineWidth = point.contested ? 5 : 3;
+      ctx.setLineDash(point.status === 'capturing' ? [10, 7] : []); ctx.stroke(); ctx.setLineDash([]);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = `900 ${Math.max(16, radius * .55)}px sans-serif`;
+      ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(15,23,42,.85)'; ctx.lineWidth = 5;
+      ctx.strokeText(point.icon, p.x, p.y - 4); ctx.fillText(point.icon, p.x, p.y - 4);
+      ctx.font = '900 12px sans-serif';
+      ctx.strokeText(`${point.id}. ${point.name}`, p.x, p.y + radius + 13);
+      ctx.fillText(`${point.id}. ${point.name}`, p.x, p.y + radius + 13);
+      const controllerName = point.capturingPlayerName || point.ownerPlayerName;
+      if (controllerName) {
+        ctx.font = '900 13px sans-serif';
+        ctx.strokeText(controllerName, p.x, p.y + 28);
+        ctx.fillText(controllerName, p.x, p.y + 28);
+      }
+      ctx.restore();
+    }
+
     function playerCells(p) {
       if (p?.cells?.length) return p.cells;
       return [{ x: p.x, y: p.y, radius: p.radius, mass: p.mass }];
@@ -499,6 +504,7 @@
         (state.spItems || []).forEach(drawSpItem);
         (state.ejected || []).forEach(drawEjected);
         state.infrastructures.forEach(drawInfrastructure);
+        (state.capturePoints || []).forEach(drawCapturePoint);
         playerBuffer.sample().slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
       }
       requestAnimationFrame(render);
@@ -563,15 +569,6 @@
       const leaderText = leader ? `${leader.name} · ${leader.share}%` : '—';
       document.getElementById('metricLeader').textContent = leaderText;
 
-      const monoEl = document.getElementById('monopolyLevel');
-      monoEl.textContent = state.metrics.monopolyLevel;
-      monoEl.className = 'm-value ' + (monoClass[state.metrics.monopolyLevel] || 'mono-low');
-
-      document.getElementById('priceIndex').textContent = state.metrics.priceIndex;
-      document.getElementById('happiness').textContent = state.metrics.citizenHappiness;
-      document.getElementById('gridOwner').textContent = state.metrics.gridOwner || (state.phase < 2 ? 'chưa xuất hiện' : 'chưa ai');
-      document.getElementById('pipeOwner').textContent = state.metrics.pipeOwner || (state.phase < 2 ? 'chưa xuất hiện' : 'chưa ai');
-
       const info = PHASE_EXPLAIN[state.phase] || PHASE_EXPLAIN[1];
       document.getElementById('explainShort').textContent = info.short;
       document.getElementById('explainFlow').textContent = info.flow;
@@ -588,6 +585,13 @@
       document.getElementById('events').innerHTML = state.events.map(e => `
         <div class="event-row ${e.severity}">${e.message}</div>
       `).join('') || '<div style="font-size:13px;color:var(--hc-text-muted)">Chưa có sự kiện.</div>';
+
+      document.getElementById('hostCaptureHud').innerHTML = (state.capturePoints || []).map(point => `
+        <div class="capture-hud-item ${point.status}" style="--point-color:${point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8'}">
+          <span>${point.icon}</span><strong>${point.name}</strong>
+          <small>${point.contested ? 'TRANH CHẤP' : point.capturingPlayerName ? `${point.capturingPlayerName} · ${point.progress}%` : point.ownerPlayerName || 'Trung lập'}</small>
+        </div>
+      `).join('');
 
       const vp = document.getElementById('votePanel');
       const showVote = state.phase === 5 && panelState.vote && state.gameStarted;
@@ -618,9 +622,10 @@
       if (!notice || notice.scope === 'personal') return;
       const el = document.getElementById('hostToast');
       el.textContent = notice.message || '';
+      el.className = `hc-toast ${notice.kind || 'info'}`;
       el.classList.remove('hide');
       clearTimeout(hostToastTimer);
-      hostToastTimer = setTimeout(() => el.classList.add('hide'), 4200);
+      hostToastTimer = setTimeout(() => el.classList.add('hide'), notice.kind === 'capture' ? 3000 : 4200);
     });
 
     function startGame() {
