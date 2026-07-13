@@ -1,6 +1,7 @@
   const express = require('express');
 const http = require('http');
 const os = require('os');
+const crypto = require('crypto');
 const { Server } = require('socket.io');
 
 const app = express();
@@ -22,6 +23,58 @@ app.get('/player', (_req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
+const HOST_PIN = String(process.env.HOST_PIN || '2468');
+const HOST_RECONNECT_GRACE_MS = Math.max(5000, Number(process.env.HOST_RECONNECT_GRACE_MS) || 30000);
+const hostAccess = {
+  deviceTokenHash: null,
+  socketId: null,
+  connected: false,
+  claimedAt: null,
+  disconnectedAt: null,
+  releaseTimer: null,
+};
+
+function hashHostToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function safeEqual(left, right) {
+  const a = Buffer.from(String(left || ''));
+  const b = Buffer.from(String(right || ''));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+function tokenOwnsHost(token) {
+  return !!hostAccess.deviceTokenHash && safeEqual(hashHostToken(token), hostAccess.deviceTokenHash);
+}
+
+function isAuthorizedHost(socket) {
+  return hostAccess.connected && hostAccess.socketId === socket.id;
+}
+
+function cancelHostRelease() {
+  if (hostAccess.releaseTimer) clearTimeout(hostAccess.releaseTimer);
+  hostAccess.releaseTimer = null;
+}
+
+function releaseHostLease() {
+  cancelHostRelease();
+  hostAccess.deviceTokenHash = null;
+  hostAccess.socketId = null;
+  hostAccess.connected = false;
+  hostAccess.claimedAt = null;
+  hostAccess.disconnectedAt = null;
+  io.emit('host:availability', { available: true });
+}
+
+function authorizeHostSocket(socket) {
+  cancelHostRelease();
+  hostAccess.socketId = socket.id;
+  hostAccess.connected = true;
+  hostAccess.disconnectedAt = null;
+  socket.emit('host:authorized', { reconnectGraceMs: HOST_RECONNECT_GRACE_MS });
+}
+
 const WORLD = { width: 6144, height: 3456 };
 const TICK_RATE = 30;
 const TICK_MS = 1000 / TICK_RATE;
@@ -1421,6 +1474,54 @@ io.on('connection', (socket) => {
     world: WORLD,
   });
 
+  socket.on('host:status', () => {
+    socket.emit('host:status', {
+      status: hostAccess.deviceTokenHash ? 'occupied' : 'available',
+      reconnectGraceMs: HOST_RECONNECT_GRACE_MS,
+    });
+  });
+
+  socket.on('host:claim', ({ pin } = {}) => {
+    if (!safeEqual(pin, HOST_PIN)) {
+      socket.emit('host:denied', { code: 'INVALID_PIN', message: 'Mã PIN Host không đúng.' });
+      return;
+    }
+    if (hostAccess.deviceTokenHash) {
+      socket.emit('host:denied', { code: 'HOST_OCCUPIED', message: 'Một thiết bị khác đang giữ quyền Host.' });
+      return;
+    }
+    const deviceToken = crypto.randomBytes(32).toString('hex');
+    hostAccess.deviceTokenHash = hashHostToken(deviceToken);
+    hostAccess.claimedAt = Date.now();
+    io.emit('host:availability', { available: false });
+    authorizeHostSocket(socket);
+    socket.emit('host:token', { deviceToken });
+  });
+
+  socket.on('host:resume', ({ deviceToken } = {}) => {
+    if (!tokenOwnsHost(deviceToken)) {
+      socket.emit('host:denied', {
+        code: hostAccess.deviceTokenHash ? 'HOST_OCCUPIED' : 'TOKEN_EXPIRED',
+        message: hostAccess.deviceTokenHash ? 'Một thiết bị khác đang giữ quyền Host.' : 'Phiên Host đã hết hạn.',
+      });
+      return;
+    }
+    if (hostAccess.connected && hostAccess.socketId !== socket.id) {
+      socket.emit('host:denied', { code: 'HOST_OCCUPIED', message: 'Host đang mở trong một tab hoặc thiết bị khác.' });
+      return;
+    }
+    authorizeHostSocket(socket);
+  });
+
+  socket.on('host:release', ({ deviceToken } = {}) => {
+    if (!isAuthorizedHost(socket) || !tokenOwnsHost(deviceToken)) {
+      socket.emit('host:denied', { code: 'NOT_AUTHORIZED', message: 'Bạn không có quyền giải phóng Host.' });
+      return;
+    }
+    releaseHostLease();
+    socket.emit('host:released');
+  });
+
   socket.on('joinGame', ({ name, logoIndex, color }) => {
     game.players[socket.id] = createPlayer(socket.id, name, logoIndex, color);
     addEvent(`${game.players[socket.id].name} gia nhập thị trường`, 'info');
@@ -1459,6 +1560,10 @@ io.on('connection', (socket) => {
   });
 
   socket.on('hostAction', (payload) => {
+    if (!isAuthorizedHost(socket)) {
+      socket.emit('host:denied', { code: 'NOT_AUTHORIZED', message: 'Bạn không có quyền Host.' });
+      return;
+    }
     const action = typeof payload === 'string' ? payload : payload?.action;
     const data = typeof payload === 'object' ? payload : {};
 
@@ -1501,6 +1606,15 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
+    if (hostAccess.socketId === socket.id) {
+      hostAccess.connected = false;
+      hostAccess.socketId = null;
+      hostAccess.disconnectedAt = Date.now();
+      cancelHostRelease();
+      hostAccess.releaseTimer = setTimeout(() => {
+        if (!hostAccess.connected && hostAccess.disconnectedAt) releaseHostLease();
+      }, HOST_RECONNECT_GRACE_MS);
+    }
     if (game.players[socket.id]) {
       addEvent(`${game.players[socket.id].name} rời thị trường`, 'warn');
       delete game.players[socket.id];
