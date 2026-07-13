@@ -132,8 +132,16 @@
       </div>
       <div class="player-effects" id="effectPanel"></div>
       <div class="notice-stack" id="noticeStack"></div>
+      <div class="capture-event-feed" id="captureEventFeed"></div>
+      <div class="capture-status-strip" id="captureStatusStrip"></div>
+      <div class="capture-progress hide" id="captureProgress">
+        <strong id="captureProgressTitle"></strong>
+        <div class="capture-progress-track"><span id="captureProgressFill"></span></div>
+        <small id="captureProgressMeta"></small>
+      </div>
 
       <div class="mini-map panel">
+        <div class="capture-radar" id="captureRadar"></div>
         <canvas id="viewCanvas" aria-label="Khu vực xung quanh doanh nghiệp của bạn"></canvas>
         <div class="viewport-hud">
           <div class="viewport-tag">Tầm nhìn hạn chế</div>
@@ -191,6 +199,13 @@
     const playerLeaderboard = document.getElementById('playerLeaderboard');
     const effectPanel = document.getElementById('effectPanel');
     const noticeStack = document.getElementById('noticeStack');
+    const captureEventFeed = document.getElementById('captureEventFeed');
+    const captureStatusStrip = document.getElementById('captureStatusStrip');
+    const captureProgress = document.getElementById('captureProgress');
+    const captureProgressTitle = document.getElementById('captureProgressTitle');
+    const captureProgressFill = document.getElementById('captureProgressFill');
+    const captureProgressMeta = document.getElementById('captureProgressMeta');
+    const captureRadar = document.getElementById('captureRadar');
     const colorInput = document.getElementById('colorInput');
     const colorPreview = document.getElementById('colorPreview');
     const openColorPicker = document.getElementById('openColorPicker');
@@ -285,6 +300,7 @@
           viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
           viewportOverlay.classList.toggle('hide', me.alive);
         }
+        renderCaptureHud(state.capturePoints || [], me);
         renderPlayerLeaderboard(state.leaderboard || []);
       }
     });
@@ -591,7 +607,67 @@
       el.className = `notice ${kind}`;
       el.textContent = message;
       noticeStack.appendChild(el);
-      setTimeout(() => el.remove(), 4200);
+      if (kind === 'capture') {
+        const event = document.createElement('div');
+        event.textContent = message;
+        captureEventFeed.prepend(event);
+        while (captureEventFeed.children.length > 4) captureEventFeed.lastElementChild.remove();
+        setTimeout(() => event.remove(), 12000);
+      }
+      setTimeout(() => el.remove(), kind === 'capture' ? 3000 : 4200);
+    }
+
+    function renderCaptureHud(points, me) {
+      captureStatusStrip.innerHTML = points.map(point => `
+        <div class="capture-status-item ${point.status}" style="--point-color:${point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8'}">
+          <span>${point.icon}</span><b>${point.name}</b><small>${point.contested ? 'Tranh chấp' : point.capturingPlayerName ? `${point.capturingPlayerName} · ${point.progress}%` : point.ownerPlayerName || 'Trung lập'}</small>
+        </div>
+      `).join('');
+      const pointMarkers = points.map(point => `
+        <span class="radar-point point-${point.id} ${point.status}" style="--point-color:${point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8'}" title="${point.name}">${point.icon}</span>
+      `).join('');
+      const worldWidth = Math.max(1, state?.world?.width || 1);
+      const worldHeight = Math.max(1, state?.world?.height || 1);
+      const playerMarkers = (state?.players || []).filter(player => player.alive).map(player => {
+        const left = Math.max(4, Math.min(96, player.x / worldWidth * 100));
+        const top = Math.max(6, Math.min(94, player.y / worldHeight * 100));
+        return `<span class="radar-player ${player.id === myId ? 'is-me' : ''}" style="left:${left}%;top:${top}%;--player-color:${player.color}"></span>`;
+      }).join('');
+      captureRadar.innerHTML = pointMarkers + playerMarkers;
+      const active = points.find(point => point.capturingPlayerId === myId);
+      captureProgress.classList.toggle('hide', !active);
+      if (!active) return;
+      captureProgress.classList.toggle('contested', active.contested);
+      captureProgressTitle.textContent = active.contested
+        ? 'CỨ ĐIỂM ĐANG BỊ TRANH CHẤP!'
+        : `${me?.name || 'Bạn'} đang chiếm ${active.name}`;
+      captureProgressFill.style.width = `${active.progress}%`;
+      captureProgressMeta.textContent = `${active.progress}% — Còn ${Math.ceil(active.remainingMs / 1000)} giây`;
+    }
+
+    function drawCapturePoint(point, camera) {
+      const p = worldToScreen(point.x, point.y, camera);
+      const radius = Math.max(30, point.radius * camera.scale);
+      const color = point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8';
+      viewCtx.save();
+      viewCtx.beginPath(); viewCtx.arc(p.x, p.y, radius, 0, Math.PI * 2);
+      viewCtx.fillStyle = `${color}2E`; viewCtx.fill();
+      viewCtx.strokeStyle = color; viewCtx.lineWidth = point.contested ? 5 : 3;
+      viewCtx.setLineDash(point.status === 'capturing' ? [10, 7] : []); viewCtx.stroke(); viewCtx.setLineDash([]);
+      viewCtx.textAlign = 'center'; viewCtx.textBaseline = 'middle';
+      viewCtx.font = `900 ${Math.max(20, radius * .48)}px sans-serif`;
+      viewCtx.fillStyle = '#fff'; viewCtx.strokeStyle = 'rgba(15,23,42,.9)'; viewCtx.lineWidth = 5;
+      viewCtx.strokeText(point.icon, p.x, p.y - 4); viewCtx.fillText(point.icon, p.x, p.y - 4);
+      viewCtx.font = '900 13px sans-serif';
+      viewCtx.strokeText(`${point.id}. ${point.name}`, p.x, p.y + radius + 14);
+      viewCtx.fillText(`${point.id}. ${point.name}`, p.x, p.y + radius + 14);
+      const controllerName = point.capturingPlayerName || point.ownerPlayerName;
+      if (controllerName) {
+        viewCtx.font = '900 14px sans-serif';
+        viewCtx.strokeText(controllerName, p.x, p.y + 28);
+        viewCtx.fillText(controllerName, p.x, p.y + 28);
+      }
+      viewCtx.restore();
     }
 
     function renderViewport() {
@@ -682,6 +758,11 @@
             GameSprites.drawInfrastructure(viewCtx, infra, p.x, p.y, rr);
           }
         }
+      }
+
+      for (const point of state.capturePoints || []) {
+        if (!isNearSight(point, me, camera, point.radius)) continue;
+        drawCapturePoint(point, camera);
       }
 
       for (const e of state.ejected || []) {

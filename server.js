@@ -67,6 +67,33 @@ const AUTO_MONOPOLY_HOLD_MS = 30 * 1000;
 const AUTO_MONOPOLY_CHECK_MS = 30 * 1000;
 const RESPAWN_BUFF_MS = 10 * 1000;
 const EFFECT_MS = 15 * 1000;
+const CAPTURE_DURATION_MS = 5 * 1000;
+const CAPTURE_RADIUS = 150;
+const CAPTURE_REWARD_INTERVAL_MS = 5 * 1000;
+const CAPTURE_REWARD_PERCENT = 1;
+
+function createCapturePoints() {
+  const marginX = 760;
+  const marginY = 570;
+  return [
+    { id: 'A', name: 'Nhà máy', icon: '⚙', x: marginX, y: marginY },
+    { id: 'B', name: 'Mỏ kim loại', icon: '⛏', x: WORLD.width - marginX, y: marginY },
+    { id: 'C', name: 'Khu tài nguyên', icon: '▣', x: marginX, y: WORLD.height - marginY },
+    { id: 'D', name: 'Kho hàng', icon: '▤', x: WORLD.width - marginX, y: WORLD.height - marginY },
+  ].map(point => ({
+    ...point,
+    radius: CAPTURE_RADIUS,
+    ownerPlayerId: null,
+    ownerPlayerName: null,
+    ownerColor: '#94A3B8',
+    capturedAt: null,
+    lastRewardAt: null,
+    capturingPlayerId: null,
+    progressMs: 0,
+    contested: false,
+    enteredAt: {},
+  }));
+}
 
 const round1 = (n) => Math.round(n * 10) / 10;
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -126,6 +153,7 @@ function createGame(opts = {}) {
     ejected: [],
     spItems: [],
     pointBags: [],
+    capturePoints: createCapturePoints(),
     lastSpDropAt: 0,
     topLeaderId: null,
     topLeaderSince: 0,
@@ -660,6 +688,100 @@ function killPlayer(p) {
   p.monopolySupervised = false;
   p.monopolyPenaltyDueAt = 0;
   syncLegacyFields(p);
+}
+
+function playerInsideCapturePoint(player, point) {
+  if (!player?.alive || !player.cells?.length) return false;
+  return player.cells.some(cell => Math.hypot(cell.x - point.x, cell.y - point.y) <= point.radius);
+}
+
+function resetCaptureAttempt(point) {
+  point.capturingPlayerId = null;
+  point.progressMs = 0;
+  point.contested = false;
+}
+
+function grantCaptureReward(point, now) {
+  const owner = point.ownerPlayerId && game.players[point.ownerPlayerId];
+  if (!owner?.alive) {
+    point.lastRewardAt = now;
+    return;
+  }
+  if (!point.lastRewardAt || now - point.lastRewardAt < CAPTURE_REWARD_INTERVAL_MS) return;
+  const rewardCount = Math.floor((now - point.lastRewardAt) / CAPTURE_REWARD_INTERVAL_MS);
+  point.lastRewardAt += rewardCount * CAPTURE_REWARD_INTERVAL_MS;
+  for (let i = 0; i < rewardCount; i += 1) {
+    const activePlayers = Object.values(game.players).filter(player => player.alive && totalMass(player) > 0);
+    const total = activePlayers.reduce((sum, player) => sum + totalMass(player), 0);
+    const ownerMass = totalMass(owner);
+    const currentShare = total > 0 ? ownerMass / total : 0;
+    const shareStep = CAPTURE_REWARD_PERCENT / 100;
+    if (currentShare >= 1 - shareStep) break;
+    const massReward = (shareStep * total) / (1 - currentShare - shareStep);
+    const cell = largestCell(owner);
+    if (!cell || !Number.isFinite(massReward) || massReward <= 0) break;
+    cell.mass += massReward;
+    owner.score += massReward;
+    syncLegacyFields(owner);
+  }
+}
+
+function updateCapturePoints() {
+  const now = Date.now();
+  const players = Object.values(game.players);
+
+  for (const point of game.capturePoints) {
+    grantCaptureReward(point, now);
+    const occupants = players.filter(player => playerInsideCapturePoint(player, point));
+    const occupantIds = new Set(occupants.map(player => player.id));
+
+    for (const player of occupants) {
+      if (!point.enteredAt[player.id]) point.enteredAt[player.id] = now;
+    }
+    for (const playerId of Object.keys(point.enteredAt)) {
+      if (!occupantIds.has(playerId)) delete point.enteredAt[playerId];
+    }
+
+    if (point.capturingPlayerId) {
+      const capturer = game.players[point.capturingPlayerId];
+      if (!capturer || !playerInsideCapturePoint(capturer, point)) {
+        resetCaptureAttempt(point);
+      }
+    }
+
+    if (!point.capturingPlayerId) {
+      const eligible = occupants
+        .filter(player => player.id !== point.ownerPlayerId)
+        .sort((a, b) => (point.enteredAt[a.id] || now) - (point.enteredAt[b.id] || now));
+      if (eligible.length) point.capturingPlayerId = eligible[0].id;
+    }
+
+    const capturer = point.capturingPlayerId && game.players[point.capturingPlayerId];
+    if (!capturer) {
+      point.contested = false;
+      continue;
+    }
+
+    point.contested = occupants.some(player => player.id !== capturer.id);
+    if (point.contested) continue;
+
+    point.progressMs = Math.min(CAPTURE_DURATION_MS, point.progressMs + TICK_MS);
+    if (point.progressMs < CAPTURE_DURATION_MS) continue;
+
+    const previousOwnerId = point.ownerPlayerId;
+    const previousOwnerName = point.ownerPlayerName;
+    point.ownerPlayerId = capturer.id;
+    point.ownerPlayerName = capturer.name;
+    point.ownerColor = capturer.color;
+    point.capturedAt = now;
+    point.lastRewardAt = now;
+    const wasStolen = previousOwnerId && previousOwnerId !== capturer.id;
+    const message = wasStolen
+      ? `${capturer.name.toUpperCase()} ĐÃ CƯỚP ${point.name.toUpperCase()} TỪ ${String(previousOwnerName || 'NGƯỜI CHƠI KHÁC').toUpperCase()}!`
+      : `${capturer.name.toUpperCase()} ĐÃ CHIẾM ${point.name.toUpperCase()}!`;
+    notifyAll(`${point.icon} ${message}`, 'capture');
+    resetCaptureAttempt(point);
+  }
 }
 
 function respawnPlayer(p) {
@@ -1300,6 +1422,30 @@ function publicState(includeResources = true) {
     })),
     spDropCooldownMs: Math.max(0, SP_DROP_COOLDOWN_MS - (Date.now() - game.lastSpDropAt)),
     infrastructures: game.infrastructures.map(i => ({ ...i, ownerName: i.ownerId && game.players[i.ownerId] ? game.players[i.ownerId].name : null })),
+    capturePoints: game.capturePoints.map(point => {
+      const capturer = point.capturingPlayerId && game.players[point.capturingPlayerId];
+      const progress = Math.min(100, Math.round((point.progressMs / CAPTURE_DURATION_MS) * 100));
+      return {
+        id: point.id,
+        name: point.name,
+        icon: point.icon,
+        x: point.x,
+        y: point.y,
+        radius: point.radius,
+        ownerPlayerId: point.ownerPlayerId,
+        ownerPlayerName: point.ownerPlayerName,
+        ownerColor: point.ownerColor,
+        capturingPlayerId: point.capturingPlayerId,
+        capturingPlayerName: capturer?.name || null,
+        capturingColor: capturer?.color || null,
+        progress,
+        remainingMs: Math.max(0, CAPTURE_DURATION_MS - point.progressMs),
+        contested: point.contested,
+        rewardPercent: CAPTURE_REWARD_PERCENT,
+        rewardIntervalMs: CAPTURE_REWARD_INTERVAL_MS,
+        status: point.contested ? 'contested' : point.capturingPlayerId ? 'capturing' : point.ownerPlayerId ? 'captured' : 'neutral',
+      };
+    }),
     leaderboard,
     events: game.events,
     metrics: {
@@ -1432,6 +1578,7 @@ setInterval(() => {
     updateTemporaryObjects();
     handleEjectedCollisions();
     handleSwallowing();
+    updateCapturePoints();
     updateAutoMonopoly();
     updateMetrics();
     endMatchIfNeeded();
