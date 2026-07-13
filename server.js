@@ -69,6 +69,7 @@ const RESPAWN_BUFF_MS = 10 * 1000;
 const EFFECT_MS = 15 * 1000;
 
 const round1 = (n) => Math.round(n * 10) / 10;
+const round2 = (n) => Math.round(n * 100) / 100;
 const HEX_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
 function safeColor(color, fallback) {
@@ -244,6 +245,11 @@ function scoreBase(p) {
 
 function addScore(p, amount) {
   p.score = Math.max(0, (p.score || 0) + amount);
+}
+
+function ejectedScoreValue(e) {
+  const value = Number(e?.value);
+  return Number.isFinite(value) ? Math.max(0, value) : EJECT_COST;
 }
 
 function subtractScorePercent(p, percent, redistribute = false) {
@@ -609,11 +615,15 @@ function ejectMass(p) {
   if (now - p.lastEjectAt < EJECT_COOLDOWN_MS) return;
 
   let ejected = false;
+  let totalCost = 0;
 
   for (const cell of p.cells) {
     if (cell.mass < MIN_EJECT_MASS) continue;
 
+    const scoreValue = Math.min(EJECT_COST, Math.max(0, (p.score || 0) - totalCost));
+    if (scoreValue <= 0) continue;
     cell.mass -= EJECT_COST;
+    totalCost += scoreValue;
     let angle = cellAngleToMouse(cell, p);
     angle += (Math.random() * EJECT_ANGLE_JITTER * 2) - EJECT_ANGLE_JITTER;
     const r = radiusFromMass(cell.mass);
@@ -625,6 +635,7 @@ function ejectMass(p) {
       x: cell.x + Math.cos(angle) * offset,
       y: cell.y + Math.sin(angle) * offset,
       mass: EJECT_GIVE,
+      value: scoreValue,
       vx: Math.cos(angle) * EJECT_SPEED,
       vy: Math.sin(angle) * EJECT_SPEED,
       color: p.color,
@@ -635,6 +646,7 @@ function ejectMass(p) {
 
   if (ejected) {
     p.lastEjectAt = now;
+    p.score = Math.max(0, (p.score || 0) - totalCost);
     p.cells = p.cells.filter(c => c.mass > 1);
     if (!p.cells.length) killPlayer(p);
     syncLegacyFields(p);
@@ -945,6 +957,7 @@ function handleEjectedCollisions() {
         const d = Math.hypot(cell.x - e.x, cell.y - e.y);
         if (d < cr + er * 0.85) {
           cell.mass += e.mass;
+          addScore(p, ejectedScoreValue(e));
           game.ejected.splice(i, 1);
         }
       }
@@ -1157,8 +1170,8 @@ function serializePlayer(p) {
   return {
     id: p.id,
     name: p.name,
-    x: lc ? Math.round(lc.x) : 0,
-    y: lc ? Math.round(lc.y) : 0,
+    x: lc ? round2(lc.x) : 0,
+    y: lc ? round2(lc.y) : 0,
     radius: lc ? round1(radiusFromMass(lc.mass)) : PLAYER_START_RADIUS,
     mass: Math.round(totalMass(p)),
     score: Math.round(p.score),
@@ -1171,8 +1184,8 @@ function serializePlayer(p) {
     shieldActive: activeUntil(p, 'shieldUntil'),
     cells: p.cells.map(c => ({
       id: c.id,
-      x: Math.round(c.x),
-      y: Math.round(c.y),
+      x: round2(c.x),
+      y: round2(c.y),
       mass: Math.round(c.mass),
       radius: round1(radiusFromMass(c.mass)),
     })),
@@ -1236,6 +1249,7 @@ function publicState(includeResources = true) {
     x: Math.round(e.x),
     y: Math.round(e.y),
     mass: Math.round(e.mass),
+    value: round1(ejectedScoreValue(e)),
     radius: round1(ejectedRadius(e.mass)),
     color: e.color,
     ownerId: e.ownerId,

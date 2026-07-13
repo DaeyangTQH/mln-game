@@ -173,6 +173,8 @@
     let resourceCache = [];
     const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
     let selfRender = null;
+    let cameraRender = null;
+    let viewportSize = { width: 1, height: 1, dpr: 1 };
     let lastFrameTs = 0;
     let focusCellId = null;
     let currentVote = null;
@@ -300,11 +302,15 @@
     function resizeViewport() {
       const box = viewCanvas.parentElement.getBoundingClientRect();
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      viewCanvas.width = Math.max(1, Math.floor(box.width * dpr));
-      viewCanvas.height = Math.max(1, Math.floor(box.height * dpr));
-      viewCanvas.style.width = `${box.width}px`;
-      viewCanvas.style.height = `${box.height}px`;
+      const width = Math.max(1, box.width);
+      const height = Math.max(1, box.height);
+      viewportSize = { width, height, dpr };
+      viewCanvas.width = Math.max(1, Math.floor(width * dpr));
+      viewCanvas.height = Math.max(1, Math.floor(height * dpr));
+      viewCanvas.style.width = `${width}px`;
+      viewCanvas.style.height = `${height}px`;
       viewCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cameraRender = null;
     }
 
     window.addEventListener('resize', resizeViewport);
@@ -313,8 +319,8 @@
     function cameraFor(me, w, h) {
       const radius = Math.max(16, me ? me.radius : 18);
       const visibleRadius = Math.max(250, Math.min(980, 185 + radius * 1.18));
-      let viewHalf = Math.max(visibleRadius * 0.88, Math.min(980, visibleRadius * 1.06));
-      let scale = Math.min(w, h) / (viewHalf * 2);
+      const viewHalf = Math.max(visibleRadius * 0.88, Math.min(980, visibleRadius * 1.06));
+      const scale = Math.min(w, h) / (viewHalf * 2);
 
       return {
         scale,
@@ -324,6 +330,38 @@
         height: h,
         x: w / 2 - me.x * scale,
         y: h / 2 - me.y * scale,
+      };
+    }
+
+    function stableCameraFor(target, w, h, dt) {
+      const ideal = cameraFor(target, w, h);
+      if (!cameraRender || cameraRender.width !== w || cameraRender.height !== h) {
+        cameraRender = { ...ideal };
+      } else {
+        const dx = ideal.x - cameraRender.x;
+        const dy = ideal.y - cameraRender.y;
+        if (dx * dx + dy * dy > 360 * 360) {
+          cameraRender.x = ideal.x;
+          cameraRender.y = ideal.y;
+          cameraRender.scale = ideal.scale;
+        } else {
+          const panK = 1 - Math.pow(1 - 0.16, dt * 60);
+          const zoomK = 1 - Math.pow(1 - 0.08, dt * 60);
+          cameraRender.x += dx * panK;
+          cameraRender.y += dy * panK;
+          cameraRender.scale += (ideal.scale - cameraRender.scale) * zoomK;
+        }
+        cameraRender.viewHalf = ideal.viewHalf;
+        cameraRender.sightRadius = ideal.sightRadius;
+        cameraRender.width = w;
+        cameraRender.height = h;
+      }
+
+      const pixel = viewportSize.dpr || 1;
+      return {
+        ...cameraRender,
+        x: Math.round(cameraRender.x * pixel) / pixel,
+        y: Math.round(cameraRender.y * pixel) / pixel,
       };
     }
 
@@ -394,10 +432,10 @@
         const localH = iy2 - iy;
         viewCtx.drawImage(
           mapSource,
-          Math.floor(ix * srcPerWorldX), Math.floor(iy * srcPerWorldY),
-          Math.ceil(localW * srcPerWorldX), Math.ceil(localH * srcPerWorldY),
-          Math.round(camera.x + ix * camera.scale), Math.round(camera.y + iy * camera.scale),
-          Math.round(localW * camera.scale), Math.round(localH * camera.scale)
+          ix * srcPerWorldX, iy * srcPerWorldY,
+          localW * srcPerWorldX, localH * srcPerWorldY,
+          camera.x + ix * camera.scale, camera.y + iy * camera.scale,
+          localW * camera.scale, localH * camera.scale
         );
       }
 
@@ -405,8 +443,8 @@
       viewCtx.lineWidth = Math.max(2, 5 * camera.scale);
       viewCtx.setLineDash([Math.max(6, 18 * camera.scale), Math.max(4, 12 * camera.scale)]);
       viewCtx.strokeRect(
-        Math.round(camera.x), Math.round(camera.y),
-        Math.round(world.width * camera.scale), Math.round(world.height * camera.scale)
+        camera.x, camera.y,
+        world.width * camera.scale, world.height * camera.scale
       );
       viewCtx.setLineDash([]);
       viewCtx.restore();
@@ -557,9 +595,8 @@
     }
 
     function renderViewport() {
-      const box = viewCanvas.parentElement.getBoundingClientRect();
-      const w = box.width;
-      const h = box.height;
+      const w = viewportSize.width;
+      const h = viewportSize.height;
       viewCtx.clearRect(0, 0, w, h);
 
       if (!state || !myId || w < 1 || h < 1) {
@@ -576,8 +613,7 @@
 
       const interpMe = interpPlayers.find(p => p.id === myId) || serverMe;
       const subjectInterp = viewSubject(interpMe);
-      const subjectServer = viewSubject(serverMe);
-      if (!subjectInterp || !subjectServer) {
+      if (!subjectInterp) {
         requestAnimationFrame(renderViewport);
         return;
       }
@@ -585,26 +621,28 @@
       const nowTs = performance.now();
       const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
       lastFrameTs = nowTs;
-      if (!selfRender) selfRender = { x: subjectInterp.x, y: subjectInterp.y };
-      const dxs = subjectServer.x - selfRender.x;
-      const dys = subjectServer.y - selfRender.y;
+      if (!selfRender) selfRender = { x: subjectInterp.x, y: subjectInterp.y, radius: subjectInterp.radius };
+      const dxs = subjectInterp.x - selfRender.x;
+      const dys = subjectInterp.y - selfRender.y;
       if (dxs * dxs + dys * dys > 300 * 300) {
-        selfRender.x = subjectServer.x;
-        selfRender.y = subjectServer.y;
+        selfRender.x = subjectInterp.x;
+        selfRender.y = subjectInterp.y;
       } else {
-        const k = 1 - Math.pow(1 - 0.4, dt * 60);
+        const k = 1 - Math.pow(1 - 0.22, dt * 60);
         selfRender.x += dxs * k;
         selfRender.y += dys * k;
       }
+      const dr = subjectInterp.radius - selfRender.radius;
+      selfRender.radius += dr * (1 - Math.pow(1 - 0.18, dt * 60));
       const me = {
         ...interpMe,
         x: selfRender.x,
         y: selfRender.y,
-        radius: subjectInterp.radius,
+        radius: selfRender.radius,
         mass: serverMe.mass,
       };
 
-      const camera = cameraFor(me, w, h);
+      const camera = stableCameraFor(me, w, h, dt);
       drawInfiniteMap(camera, w, h);
 
       for (const r of resourceCache) {
@@ -698,9 +736,11 @@
       const me = cameraMe();
       if (!me || !state) return null;
       const box = viewCanvas.parentElement.getBoundingClientRect();
-      const w = box.width;
-      const h = box.height;
-      const camera = cameraFor(me, w, h);
+      const w = viewportSize.width || box.width;
+      const h = viewportSize.height || box.height;
+      const camera = cameraRender && cameraRender.width === w && cameraRender.height === h
+        ? cameraRender
+        : cameraFor(me, w, h);
       return {
         x: (clientX - box.left - camera.x) / camera.scale,
         y: (clientY - box.top - camera.y) / camera.scale,
