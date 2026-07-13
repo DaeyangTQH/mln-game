@@ -146,14 +146,13 @@
         ],
       },
       2: {
-        short: 'Giai đoạn 2: Độc quyền hạ tầng — ai nắm lưới điện và đường ống nước sẽ có quyền lực đặc biệt.',
-        flow: 'Tích tụ vốn → Hạ tầng chiến lược → Độc quyền tự nhiên → Quyền lực thị trường',
+        short: 'Giai đoạn 2: Chiếm cứ điểm — người chơi kiểm soát các vị trí chiến lược để gia tăng thị phần.',
+        flow: 'Tích tụ vốn → Chiếm cứ điểm → Bảo vệ vị trí → Gia tăng thị phần',
         cards: [
           { title: 'Vốn', sub: 'Tích tụ tư bản', sheet: 'policy', index: 14 },
           { title: 'Công nghệ', sub: 'Lực lượng sản xuất', sheet: 'icons', index: 2 },
           { title: 'Khách hàng', sub: 'Thị phần tiêu dùng', sheet: 'icons', index: 4 },
-          { title: 'Lưới điện', sub: 'Hạ tầng chiến lược', sheet: 'policy', index: 11 },
-          { title: 'Đường ống nước', sub: 'Độc quyền tự nhiên', sheet: 'policy', index: 12 },
+          { title: 'Cứ điểm', sub: 'Vị trí chiến lược', sheet: 'policy', index: 11 },
         ],
       },
       3: {
@@ -387,22 +386,6 @@
       ctx.restore();
     }
 
-    function drawInfrastructure(i) {
-      if (state.phase < 2) return;
-      const p = worldToScreen(i.x, i.y);
-      const screenR = Math.max(10, i.radius * camera.scale * 0.72);
-      ctx.save();
-      const glow = i.type === 'electricity' ? 'rgba(242,201,76,.45)' : 'rgba(114,183,201,.45)';
-      ctx.beginPath();
-      ctx.fillStyle = glow;
-      ctx.arc(p.x, p.y, screenR + 4, 0, Math.PI * 2);
-      ctx.fill();
-      if (GameSprites.isReady()) {
-        GameSprites.drawInfrastructure(ctx, i, p.x, p.y, screenR);
-      }
-      ctx.restore();
-    }
-
     function drawCapturePoint(point) {
       const p = worldToScreen(point.x, point.y);
       const radius = Math.max(24, point.radius * camera.scale);
@@ -503,7 +486,6 @@
         (state.pointBags || []).forEach(drawPointBag);
         (state.spItems || []).forEach(drawSpItem);
         (state.ejected || []).forEach(drawEjected);
-        state.infrastructures.forEach(drawInfrastructure);
         (state.capturePoints || []).forEach(drawCapturePoint);
         playerBuffer.sample().slice().sort((a, b) => a.radius - b.radius).forEach(drawPlayer);
       }

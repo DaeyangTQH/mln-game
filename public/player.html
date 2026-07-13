@@ -745,21 +745,6 @@
         drawSpItem(item, camera);
       }
 
-      if (state.phase >= 2) {
-        for (const infra of state.infrastructures) {
-          if (!isNearSight(infra, me, camera, infra.radius)) continue;
-          const p = worldToScreen(infra.x, infra.y, camera);
-          const rr = Math.max(18, infra.radius * camera.scale);
-          viewCtx.beginPath();
-          viewCtx.fillStyle = infra.type === 'electricity' ? 'rgba(250,204,21,.18)' : 'rgba(56,189,248,.18)';
-          viewCtx.arc(p.x, p.y, rr, 0, Math.PI * 2);
-          viewCtx.fill();
-          if (GameSprites.isReady()) {
-            GameSprites.drawInfrastructure(viewCtx, infra, p.x, p.y, rr);
-          }
-        }
-      }
-
       for (const point of state.capturePoints || []) {
         if (!isNearSight(point, me, camera, point.radius)) continue;
         drawCapturePoint(point, camera);

@@ -34,7 +34,6 @@ const PLAYER_START_MASS = Number(process.env.PLAYER_START_MASS) || 100;
 const MATCH_DURATION_MS = 15 * 60 * 1000;
 const RADIUS_GROWTH_SCALE = 1.5;       // ↑ lớn hơn = phình to nhanh hơn khi tăng mass
 const RESOURCE_MASS_GAIN = 5;         // ↑ lớn hơn = ăn tài nguyên tăng quy mô nhanh hơn
-const INFRA_PASSIVE_GAIN = 0.009;       // ↑ lớn hơn = thu nhập thụ động từ hạ tầng nhanh hơn
 const SWALLOW_MASS_TRANSFER = 0.45;     // ↑ lớn hơn = thâu tóm đối thủ cho nhiều mass hơn
 const RESOURCE_HITBOX_SCALE = 1.18;
 const MONOPOLY_SHARE_WARNING = 0.45;
@@ -69,8 +68,8 @@ const RESPAWN_BUFF_MS = 10 * 1000;
 const EFFECT_MS = 15 * 1000;
 const CAPTURE_DURATION_MS = 5 * 1000;
 const CAPTURE_RADIUS = 150;
-const CAPTURE_REWARD_INTERVAL_MS = 5 * 1000;
-const CAPTURE_REWARD_PERCENT = 1;
+const CAPTURE_REWARD_INTERVAL_MS = 10 * 1000;
+const CAPTURE_REWARD_POINTS = 50;
 
 function createCapturePoints() {
   const marginX = 760;
@@ -157,10 +156,6 @@ function createGame(opts = {}) {
     lastSpDropAt: 0,
     topLeaderId: null,
     topLeaderSince: 0,
-    infrastructures: [
-      { id: 'grid', type: 'electricity', label: 'Lưới điện', x: WORLD.width * 0.34, y: WORLD.height * 0.5, radius: 110, ownerId: null, capturedAt: null, color: '#facc15' },
-      { id: 'pipe', type: 'water', label: 'Đường ống nước', x: WORLD.width * 0.66, y: WORLD.height * 0.5, radius: 110, ownerId: null, capturedAt: null, color: '#38bdf8' },
-    ],
     events: [],
     votes: {},
     metrics: {
@@ -170,7 +165,6 @@ function createGame(opts = {}) {
       priceIndex: 100,
       citizenHappiness: 100,
       monopolyLevel: 'Thấp',
-      infrastructureRisk: 'Chưa xuất hiện',
     },
   };
 }
@@ -710,20 +704,9 @@ function grantCaptureReward(point, now) {
   if (!point.lastRewardAt || now - point.lastRewardAt < CAPTURE_REWARD_INTERVAL_MS) return;
   const rewardCount = Math.floor((now - point.lastRewardAt) / CAPTURE_REWARD_INTERVAL_MS);
   point.lastRewardAt += rewardCount * CAPTURE_REWARD_INTERVAL_MS;
-  for (let i = 0; i < rewardCount; i += 1) {
-    const activePlayers = Object.values(game.players).filter(player => player.alive && totalMass(player) > 0);
-    const total = activePlayers.reduce((sum, player) => sum + totalMass(player), 0);
-    const ownerMass = totalMass(owner);
-    const currentShare = total > 0 ? ownerMass / total : 0;
-    const shareStep = CAPTURE_REWARD_PERCENT / 100;
-    if (currentShare >= 1 - shareStep) break;
-    const massReward = (shareStep * total) / (1 - currentShare - shareStep);
-    const cell = largestCell(owner);
-    if (!cell || !Number.isFinite(massReward) || massReward <= 0) break;
-    cell.mass += massReward;
-    owner.score += massReward;
-    syncLegacyFields(owner);
-  }
+  const reward = rewardCount * CAPTURE_REWARD_POINTS;
+  addScore(owner, reward);
+  notifyPlayer(owner.id, `+${reward} điểm từ ${point.name}`, 'success');
 }
 
 function updateCapturePoints() {
@@ -1013,30 +996,6 @@ function collectPointBags(p) {
   syncLegacyFields(p);
 }
 
-function handleInfra(p) {
-  if (game.phase < 2) return;
-  const c = centroid(p);
-  const tm = totalMass(p);
-  const pr = radiusFromMass(tm);
-
-  for (const infra of game.infrastructures) {
-    const d = Math.hypot(c.x - infra.x, c.y - infra.y);
-    if (d < infra.radius + pr * 0.55) {
-      if (infra.ownerId !== p.id && pr > 27) {
-        infra.ownerId = p.id;
-        infra.capturedAt = Date.now();
-        addEvent(`${p.name} kiểm soát ${infra.label}`, infra.id === 'grid' ? 'electricity' : 'water');
-      }
-    }
-    if (infra.ownerId === p.id && p.alive) {
-      p.score += 0.02;
-      const lc = largestCell(p);
-      if (lc) lc.mass += INFRA_PASSIVE_GAIN;
-      syncLegacyFields(p);
-    }
-  }
-}
-
 function mergeCells(p) {
   const now = Date.now();
   let merged = true;
@@ -1133,9 +1092,6 @@ function handleSwallowing() {
         game.metrics.swallowed += 1;
         addEvent(`${bigPlayer.name} thâu tóm ${smallPlayer.name}`, 'danger');
         killPlayer(smallPlayer);
-        for (const infra of game.infrastructures) {
-          if (infra.ownerId === smallPlayer.id) infra.ownerId = bigPlayer.id;
-        }
       }
       syncLegacyFields(bigPlayer);
       syncLegacyFields(smallPlayer);
@@ -1161,7 +1117,6 @@ function updatePlayer(p) {
   collectResources(p);
   collectSpItems(p);
   collectPointBags(p);
-  handleInfra(p);
   mergeCells(p);
 }
 
@@ -1264,15 +1219,8 @@ function updateMetrics() {
   if (topShare >= MONOPOLY_SHARE_WARNING) level = 'Cao';
   if (topShare >= MONOPOLY_SHARE_DANGER) level = 'Rất cao';
 
-  const ownedInfra = game.infrastructures.filter(i => i.ownerId).length;
-  let infraRisk = 'Chưa rõ';
-  if (game.phase < 2) infraRisk = 'Chưa xuất hiện';
-  else if (ownedInfra === 0) infraRisk = 'Thấp';
-  else if (ownedInfra === 1) infraRisk = 'Cao';
-  else infraRisk = 'Rất cao';
-
-  const priceIndex = Math.round(100 + topShare * 78 + ownedInfra * 16);
-  const citizenHappiness = Math.max(20, Math.round(100 - topShare * 50 - ownedInfra * 12));
+  const priceIndex = Math.round(100 + topShare * 78);
+  const citizenHappiness = Math.max(20, Math.round(100 - topShare * 50));
 
   game.metrics = {
     ...game.metrics,
@@ -1282,7 +1230,6 @@ function updateMetrics() {
     priceIndex,
     citizenHappiness,
     monopolyLevel: level,
-    infrastructureRisk: infraRisk,
   };
 }
 
@@ -1356,11 +1303,6 @@ function publicState(includeResources = true) {
   const voteCounts = { A: 0, B: 0, C: 0 };
   for (const option of Object.values(game.votes)) voteCounts[option] += 1;
 
-  const grid = game.infrastructures.find(i => i.id === 'grid');
-  const pipe = game.infrastructures.find(i => i.id === 'pipe');
-  const gridOwner = grid?.ownerId && game.players[grid.ownerId] ? game.players[grid.ownerId].name : null;
-  const pipeOwner = pipe?.ownerId && game.players[pipe.ownerId] ? game.players[pipe.ownerId].name : null;
-
   const elapsedMs = game.gameStarted && game.startedAt ? Date.now() - game.startedAt : 0;
   const remainingMs = game.gameStarted && game.startedAt
     ? Math.max(0, game.sessionDurationMs - elapsedMs)
@@ -1421,7 +1363,6 @@ function publicState(includeResources = true) {
       color: bag.color,
     })),
     spDropCooldownMs: Math.max(0, SP_DROP_COOLDOWN_MS - (Date.now() - game.lastSpDropAt)),
-    infrastructures: game.infrastructures.map(i => ({ ...i, ownerName: i.ownerId && game.players[i.ownerId] ? game.players[i.ownerId].name : null })),
     capturePoints: game.capturePoints.map(point => {
       const capturer = point.capturingPlayerId && game.players[point.capturingPlayerId];
       const progress = Math.min(100, Math.round((point.progressMs / CAPTURE_DURATION_MS) * 100));
@@ -1441,18 +1382,17 @@ function publicState(includeResources = true) {
         progress,
         remainingMs: Math.max(0, CAPTURE_DURATION_MS - point.progressMs),
         contested: point.contested,
-        rewardPercent: CAPTURE_REWARD_PERCENT,
+        rewardPoints: CAPTURE_REWARD_POINTS,
         rewardIntervalMs: CAPTURE_REWARD_INTERVAL_MS,
+        nextRewardMs: point.ownerPlayerId && point.lastRewardAt
+          ? Math.max(0, CAPTURE_REWARD_INTERVAL_MS - (Date.now() - point.lastRewardAt))
+          : null,
         status: point.contested ? 'contested' : point.capturingPlayerId ? 'capturing' : point.ownerPlayerId ? 'captured' : 'neutral',
       };
     }),
     leaderboard,
     events: game.events,
-    metrics: {
-      ...game.metrics,
-      gridOwner,
-      pipeOwner,
-    },
+    metrics: game.metrics,
     voteCounts,
     playerCount: Object.keys(game.players).length,
     lan: cachedLan,
