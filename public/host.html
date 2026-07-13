@@ -117,7 +117,7 @@
 
     <section class="hc-vote hide" id="votePanel">
       <div class="hc-card-title">Bình chọn chính sách</div>
-      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Nhà nước có nên can thiệp khi điện/nước bị một doanh nghiệp kiểm soát?</div>
+      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Nhà nước có nên can thiệp khi một doanh nghiệp chi phối thị trường?</div>
       <div class="vote-bar"><span>A</span><div class="vote-track"><div class="vote-fill" id="voteA"></div></div><span id="voteACount">0</span></div>
       <div class="vote-bar"><span>B</span><div class="vote-track"><div class="vote-fill" id="voteB"></div></div><span id="voteBCount">0</span></div>
       <div class="vote-bar"><span>C</span><div class="vote-track"><div class="vote-fill" id="voteC"></div></div><span id="voteCCount">0</span></div>
@@ -239,7 +239,7 @@
         ],
       },
       2: {
-        short: 'Giai đoạn 2: Chiếm cứ điểm — người chơi kiểm soát các vị trí chiến lược để gia tăng thị phần.',
+        short: 'Giai đoạn 2: Tích tụ tư bản — người chơi mở rộng quy mô, thâu tóm và kiểm soát các cứ điểm chiến lược.',
         flow: 'Tích tụ vốn → Chiếm cứ điểm → Bảo vệ vị trí → Gia tăng thị phần',
         cards: [
           { title: 'Vốn', sub: 'Tích tụ tư bản', sheet: 'policy', index: 14 },
@@ -270,17 +270,7 @@
     };
 
     PHASE_EXPLAIN[4] = {
-      short: 'Giai đoạn 4: Chuyển tiếp điều tiết — thị trường vẫn cạnh tranh nhưng luật chống độc quyền bắt đầu tạo áp lực rõ hơn.',
-      flow: 'Độc quyền → Giám sát → Phân phối lại nguồn lực → Chuẩn bị điều tiết mạnh',
-      cards: [
-        { title: 'Giám sát', sub: 'Theo dõi top 1', sheet: 'policy', index: 6 },
-        { title: 'Túi điểm', sub: 'Nguồn lực được phân phối lại', sheet: 'policy', index: 14 },
-        { title: 'SP Item', sub: 'Cơ hội đảo chiều', sheet: 'icons', index: 2 },
-      ],
-    };
-
-    PHASE_EXPLAIN[5] = {
-      short: 'Giai đoạn 5: Độc quyền nhà nước — Nhà nước can thiệp mạnh hơn để hạn chế top 1 snowball và mở cơ hội comeback.',
+      short: 'Giai đoạn 4: Độc quyền nhà nước — Nhà nước can thiệp mạnh để hạn chế doanh nghiệp dẫn đầu và tạo cơ hội trở lại.',
       flow: 'Độc quyền → Điều tiết nhà nước → Chống độc quyền → Cân bằng thị trường',
       cards: [
         { title: 'Luật chống độc quyền', sub: 'Kiềm chế doanh nghiệp quá lớn', sheet: 'policy', index: 6 },
@@ -669,7 +659,7 @@
       `).join('');
 
       const vp = document.getElementById('votePanel');
-      const showVote = state.phase === 5 && panelState.vote && state.gameStarted;
+      const showVote = state.phase === 4 && panelState.vote && state.gameStarted;
       vp.classList.toggle('hide', !showVote);
       const total = Math.max(1, state.voteCounts.A + state.voteCounts.B + state.voteCounts.C);
       ['A', 'B', 'C'].forEach(k => {

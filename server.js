@@ -85,6 +85,12 @@ const RESOURCE_COUNT = 680;
 const PLAYER_START_RADIUS = 18;
 const PLAYER_START_MASS = Number(process.env.PLAYER_START_MASS) || 100;
 const MATCH_DURATION_MS = 15 * 60 * 1000;
+const PHASE_TIMELINE = [
+  { phase: 1, name: 'Cạnh tranh tự do', startMs: 0 },
+  { phase: 2, name: 'Tích tụ tư bản', startMs: 2 * 60 * 1000 },
+  { phase: 3, name: 'Độc quyền', startMs: 7 * 60 * 1000 },
+  { phase: 4, name: 'Độc quyền nhà nước', startMs: 12 * 60 * 1000 },
+];
 const RADIUS_GROWTH_SCALE = 1.5;       // ↑ lớn hơn = phình to nhanh hơn khi tăng mass
 const RESOURCE_MASS_GAIN = 5;         // ↑ lớn hơn = ăn tài nguyên tăng quy mô nhanh hơn
 const SWALLOW_MASS_TRANSFER = 0.45;     // ↑ lớn hơn = thâu tóm đối thủ cho nhiều mass hơn
@@ -122,7 +128,8 @@ const EFFECT_MS = 15 * 1000;
 const CAPTURE_DURATION_MS = 5 * 1000;
 const CAPTURE_RADIUS = 150;
 const CAPTURE_REWARD_INTERVAL_MS = 10 * 1000;
-const CAPTURE_REWARD_POINTS = 50;
+const CAPTURE_REWARD_BASE_POINTS = 50;
+const CAPTURE_MAX_REWARD_LEVEL = 15;
 
 function createCapturePoints() {
   const marginX = 760;
@@ -140,6 +147,7 @@ function createCapturePoints() {
     ownerColor: '#94A3B8',
     capturedAt: null,
     lastRewardAt: null,
+    rewardLevel: 0,
     capturingPlayerId: null,
     progressMs: 0,
     contested: false,
@@ -197,6 +205,8 @@ function createGame(opts = {}) {
     gameStarted: false,
     gameEnded: false,
     startedAt: null,
+    pausedAt: null,
+    totalPausedMs: 0,
     manualPhaseOverride: false,
     sessionDurationMs: MATCH_DURATION_MS,
     customJoinUrl: opts.customJoinUrl || null,
@@ -261,15 +271,13 @@ function randomTtl(minMs, maxMs) {
 }
 
 function elapsedMs() {
-  return game.gameStarted && game.startedAt ? Date.now() - game.startedAt : 0;
+  if (!game.gameStarted || !game.startedAt) return 0;
+  const currentPauseMs = game.pausedAt ? Date.now() - game.pausedAt : 0;
+  return Math.max(0, Date.now() - game.startedAt - game.totalPausedMs - currentPauseMs);
 }
 
 function phaseForElapsed(ms) {
-  if (ms < 2 * 60 * 1000) return { phase: 1, name: 'Cạnh tranh tự do' };
-  if (ms < 7 * 60 * 1000) return { phase: 2, name: 'Tích tụ tư bản' };
-  if (ms < 12 * 60 * 1000) return { phase: 3, name: 'Độc quyền' };
-  if (ms < 13 * 60 * 1000) return { phase: 4, name: 'Chuyển tiếp điều tiết' };
-  return { phase: 5, name: 'Độc quyền nhà nước' };
+  return PHASE_TIMELINE.slice().reverse().find(item => ms >= item.startMs) || PHASE_TIMELINE[0];
 }
 
 function updatePhaseByTime() {
@@ -279,7 +287,7 @@ function updatePhaseByTime() {
   if (game.phase !== next.phase) {
     game.phase = next.phase;
     game.phaseName = next.name;
-    if (game.phase === 5) game.votes = {};
+    if (game.phase === 4) game.votes = {};
     addEvent(`Giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
   }
 }
@@ -757,9 +765,14 @@ function grantCaptureReward(point, now) {
   if (!point.lastRewardAt || now - point.lastRewardAt < CAPTURE_REWARD_INTERVAL_MS) return;
   const rewardCount = Math.floor((now - point.lastRewardAt) / CAPTURE_REWARD_INTERVAL_MS);
   point.lastRewardAt += rewardCount * CAPTURE_REWARD_INTERVAL_MS;
-  const reward = rewardCount * CAPTURE_REWARD_POINTS;
+  let reward = 0;
+  for (let i = 0; i < rewardCount && point.rewardLevel < CAPTURE_MAX_REWARD_LEVEL; i += 1) {
+    point.rewardLevel += 1;
+    reward += point.rewardLevel * CAPTURE_REWARD_BASE_POINTS;
+  }
+  if (reward <= 0) return;
   addScore(owner, reward);
-  notifyPlayer(owner.id, `+${reward} điểm từ ${point.name}`, 'success');
+  notifyPlayer(owner.id, `${point.name} · mốc ${point.rewardLevel}: +${reward} điểm`, 'success');
 }
 
 function updateCapturePoints() {
@@ -811,6 +824,9 @@ function updateCapturePoints() {
     point.ownerColor = capturer.color;
     point.capturedAt = now;
     point.lastRewardAt = now;
+    point.rewardLevel = 1;
+    addScore(capturer, CAPTURE_REWARD_BASE_POINTS);
+    notifyPlayer(capturer.id, `Chiếm ${point.name} · mốc 1: +${CAPTURE_REWARD_BASE_POINTS} điểm`, 'success');
     const wasStolen = previousOwnerId && previousOwnerId !== capturer.id;
     const message = wasStolen
       ? `${capturer.name.toUpperCase()} ĐÃ CƯỚP ${point.name.toUpperCase()} TỪ ${String(previousOwnerName || 'NGƯỜI CHƠI KHÁC').toUpperCase()}!`
@@ -1101,7 +1117,7 @@ function handleEjectedCollisions() {
 }
 
 function handleSwallowing() {
-  if (game.gameStarted && elapsedMs() < 2 * 60 * 1000) return;
+  if (game.gameStarted && elapsedMs() < PHASE_TIMELINE[1].startMs) return;
 
   const alive = Object.values(game.players).filter(p => p.alive && p.cells.length);
   const allCells = [];
@@ -1175,17 +1191,16 @@ function updatePlayer(p) {
 
 function nextPhase() {
   game.manualPhaseOverride = true;
-  if (game.phase < 5) game.phase += 1;
+  if (game.phase < 4) game.phase += 1;
   else game.phase = 1;
   const names = {
     1: 'Cạnh tranh tự do',
-    2: 'Độc quyền hạ tầng điện/nước',
-    3: 'Chính sách: Bán hay không bán?',
+    2: 'Tích tụ tư bản',
+    3: 'Độc quyền',
+    4: 'Độc quyền nhà nước',
   };
-  names[4] = 'Chuyển tiếp điều tiết';
-  names[5] = 'Độc quyền nhà nước';
   game.phaseName = names[game.phase];
-  if (game.phase === 5) game.votes = {};
+  if (game.phase === 4) game.votes = {};
   addEvent(`Chuyển sang giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
 }
 
@@ -1356,9 +1371,9 @@ function publicState(includeResources = true) {
   const voteCounts = { A: 0, B: 0, C: 0 };
   for (const option of Object.values(game.votes)) voteCounts[option] += 1;
 
-  const elapsedMs = game.gameStarted && game.startedAt ? Date.now() - game.startedAt : 0;
+  const elapsed = elapsedMs();
   const remainingMs = game.gameStarted && game.startedAt
-    ? Math.max(0, game.sessionDurationMs - elapsedMs)
+    ? Math.max(0, game.sessionDurationMs - elapsed)
     : game.sessionDurationMs;
 
   const ejected = game.ejected.map(e => ({
@@ -1379,7 +1394,7 @@ function publicState(includeResources = true) {
     running: game.running,
     gameStarted: game.gameStarted,
     gameEnded: game.gameEnded,
-    elapsedMs,
+    elapsedMs: elapsed,
     remainingMs,
     sessionDurationMs: game.sessionDurationMs,
     joinUrl: getJoinUrl(game),
@@ -1435,7 +1450,12 @@ function publicState(includeResources = true) {
         progress,
         remainingMs: Math.max(0, CAPTURE_DURATION_MS - point.progressMs),
         contested: point.contested,
-        rewardPoints: CAPTURE_REWARD_POINTS,
+        rewardBasePoints: CAPTURE_REWARD_BASE_POINTS,
+        rewardLevel: point.rewardLevel,
+        maxRewardLevel: CAPTURE_MAX_REWARD_LEVEL,
+        nextRewardPoints: point.rewardLevel < CAPTURE_MAX_REWARD_LEVEL
+          ? (point.rewardLevel + 1) * CAPTURE_REWARD_BASE_POINTS
+          : 0,
         rewardIntervalMs: CAPTURE_REWARD_INTERVAL_MS,
         nextRewardMs: point.ownerPlayerId && point.lastRewardAt
           ? Math.max(0, CAPTURE_REWARD_INTERVAL_MS - (Date.now() - point.lastRewardAt))
@@ -1573,6 +1593,8 @@ io.on('connection', (socket) => {
         game.running = true;
         game.gameEnded = false;
         game.startedAt = Date.now();
+        game.pausedAt = null;
+        game.totalPausedMs = 0;
         game.manualPhaseOverride = false;
         game.resources = generateResources();
         game.ejected = [];
@@ -1587,7 +1609,22 @@ io.on('connection', (socket) => {
     }
     if (action === 'pause') {
       if (!game.gameStarted) return;
-      game.running = !game.running;
+      if (game.running) {
+        game.running = false;
+        game.pausedAt = Date.now();
+      } else {
+        const pauseDuration = game.pausedAt ? Date.now() - game.pausedAt : 0;
+        game.totalPausedMs += pauseDuration;
+        for (const point of game.capturePoints) {
+          if (point.lastRewardAt) point.lastRewardAt += pauseDuration;
+        }
+        if (game.topLeaderSince) game.topLeaderSince += pauseDuration;
+        for (const player of Object.values(game.players)) {
+          if (player.monopolyPenaltyDueAt) player.monopolyPenaltyDueAt += pauseDuration;
+        }
+        game.pausedAt = null;
+        game.running = true;
+      }
       addEvent(game.running ? 'Tiếp tục trò chơi' : 'Tạm dừng trò chơi', 'info');
     }
     if (action === 'setJoinUrl') {
