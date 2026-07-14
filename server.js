@@ -25,6 +25,7 @@ app.get('/player', (_req, res) => {
 const PORT = process.env.PORT || 3000;
 const HOST_PIN = String(process.env.HOST_PIN || '2468');
 const HOST_RECONNECT_GRACE_MS = Math.max(5000, Number(process.env.HOST_RECONNECT_GRACE_MS) || 30000);
+const MAX_PLAYERS = Math.max(1, Number.parseInt(process.env.MAX_PLAYERS || '50', 10) || 50);
 const hostAccess = {
   deviceTokenHash: null,
   socketId: null,
@@ -69,6 +70,7 @@ function releaseHostLease() {
 
 function authorizeHostSocket(socket) {
   cancelHostRelease();
+  socket.join('hosts');
   hostAccess.socketId = socket.id;
   hostAccess.connected = true;
   hostAccess.disconnectedAt = null;
@@ -98,6 +100,19 @@ const RESOURCE_HITBOX_SCALE = 1.18;
 const MONOPOLY_SHARE_WARNING = 0.45;
 const MONOPOLY_SHARE_DANGER = 0.65;
 const RESOURCE_SYNC_EVERY = 3;
+const PLAYER_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.PLAYER_NETWORK_RATE) || 30));
+const HOST_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.HOST_NETWORK_RATE) || 30));
+const IDLE_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.IDLE_NETWORK_RATE) || 2));
+const PERSONAL_STATE_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.PERSONAL_STATE_RATE) || 5));
+const PLAYER_AOI_RADIUS = Math.max(400, Number(process.env.PLAYER_AOI_RADIUS) || 900);
+const PLAYER_RESOURCE_RATE = Math.max(1, Number(process.env.PLAYER_RESOURCE_RATE) || 3);
+const HOST_RESOURCE_RATE = Math.max(1, Number(process.env.HOST_RESOURCE_RATE) || 5);
+const PLAYER_NETWORK_EVERY = Math.max(1, Math.round(TICK_RATE / PLAYER_NETWORK_RATE));
+const HOST_NETWORK_EVERY = Math.max(1, Math.round(TICK_RATE / HOST_NETWORK_RATE));
+const IDLE_NETWORK_EVERY = Math.max(1, Math.round(TICK_RATE / IDLE_NETWORK_RATE));
+const PERSONAL_STATE_EVERY = Math.max(1, Math.round(TICK_RATE / PERSONAL_STATE_RATE));
+const PLAYER_RESOURCE_EVERY = Math.max(1, Math.round(PLAYER_NETWORK_RATE / PLAYER_RESOURCE_RATE));
+const HOST_RESOURCE_EVERY = Math.max(1, Math.round(HOST_NETWORK_RATE / HOST_RESOURCE_RATE));
 
 const MAX_CELLS = 8;
 const MIN_SPLIT_MASS = 200;
@@ -114,6 +129,8 @@ const SPLIT_IMPULSE = 24;
 const EJECT_COOLDOWN_MS = 100;
 const EJECT_ANGLE_JITTER = 0.3;
 const EJECTED_TTL_MS = 12000;
+const MAX_EJECTED_PER_PLAYER = Math.max(1, Number.parseInt(process.env.MAX_EJECTED_PER_PLAYER || '32', 10) || 32);
+const MAX_EJECTED_GLOBAL = Math.max(MAX_EJECTED_PER_PLAYER, Number.parseInt(process.env.MAX_EJECTED_GLOBAL || '500', 10) || 500);
 const CELL_IMPULSE_DECAY = 0.86;
 const SP_DROP_COOLDOWN_MS = 2 * 60 * 1000;
 const SP_ITEM_MIN_TTL_MS = 30 * 1000;
@@ -633,6 +650,7 @@ function createPlayer(socketId, name, logoIndex = 0, color = null) {
     joinedAt: Date.now(),
     lastSplitAt: 0,
     lastEjectAt: 0,
+    networkSendCount: 0,
     effects: {
       resourceBoostUntil: 0,
       shieldUntil: 0,
@@ -699,8 +717,10 @@ function ejectMass(p) {
 
   let ejected = false;
   let totalCost = 0;
+  let ownerEjectedCount = game.ejected.reduce((count, item) => count + (item.ownerId === p.id ? 1 : 0), 0);
 
   for (const cell of p.cells) {
+    if (game.ejected.length >= MAX_EJECTED_GLOBAL || ownerEjectedCount >= MAX_EJECTED_PER_PLAYER) break;
     if (cell.mass < MIN_EJECT_MASS) continue;
 
     const scoreValue = Math.min(EJECT_COST, Math.max(0, (p.score || 0) - totalCost));
@@ -724,6 +744,7 @@ function ejectMass(p) {
       color: p.color,
       spawnedAt: now,
     });
+    ownerEjectedCount += 1;
     ejected = true;
   }
 
@@ -965,6 +986,63 @@ function resolveOwnCellCollisions(p) {
   }
 }
 
+class UniformSpatialGrid {
+  constructor(cellSize = 256) {
+    this.cellSize = cellSize;
+    this.buckets = new Map();
+    this.objectKeys = new Map();
+  }
+
+  keyFor(x, y) {
+    return `${Math.floor(x / this.cellSize)},${Math.floor(y / this.cellSize)}`;
+  }
+
+  insert(object) {
+    if (!object || !Number.isFinite(object.x) || !Number.isFinite(object.y)) return;
+    const key = this.keyFor(object.x, object.y);
+    const bucket = this.buckets.get(key) || [];
+    bucket.push(object);
+    this.buckets.set(key, bucket);
+    this.objectKeys.set(object, key);
+  }
+
+  remove(object) {
+    const key = this.objectKeys.get(object);
+    if (key === undefined) return;
+    const bucket = this.buckets.get(key);
+    if (bucket) {
+      const index = bucket.indexOf(object);
+      if (index >= 0) bucket.splice(index, 1);
+      if (!bucket.length) this.buckets.delete(key);
+    }
+    this.objectKeys.delete(object);
+  }
+
+  queryCircle(x, y, radius) {
+    const candidates = [];
+    const minX = Math.floor((x - radius) / this.cellSize);
+    const maxX = Math.floor((x + radius) / this.cellSize);
+    const minY = Math.floor((y - radius) / this.cellSize);
+    const maxY = Math.floor((y + radius) / this.cellSize);
+    for (let gx = minX; gx <= maxX; gx += 1) {
+      for (let gy = minY; gy <= maxY; gy += 1) {
+        const bucket = this.buckets.get(`${gx},${gy}`);
+        if (bucket) candidates.push(...bucket);
+      }
+    }
+    return candidates;
+  }
+
+  static from(objects, cellSize = 256) {
+    const grid = new UniformSpatialGrid(cellSize);
+    for (const object of objects) grid.insert(object);
+    return grid;
+  }
+}
+
+let tickResourceGrid = null;
+let tickEjectedGrid = null;
+
 function updateEjected() {
   const now = Date.now();
   game.ejected = game.ejected.filter(e => {
@@ -983,15 +1061,22 @@ function updateEjected() {
 function collectResources(p) {
   for (const cell of p.cells) {
     const cr = radiusFromMass(cell.mass);
-    for (let i = game.resources.length - 1; i >= 0; i--) {
-      const r = game.resources[i];
+    const candidates = tickResourceGrid
+      ? tickResourceGrid.queryCircle(cell.x, cell.y, cr + 16)
+      : game.resources;
+    for (const r of candidates) {
+      const i = game.resources.indexOf(r);
+      if (i < 0) continue;
       const d = Math.hypot(cell.x - r.x, cell.y - r.y);
       if (d < cr + resourceHitRadius(r)) {
         const mult = resourceMultiplier(p);
         cell.mass += r.value * RESOURCE_MASS_GAIN * mult;
         p.score += r.value * mult;
         game.resources.splice(i, 1);
-        game.resources.push(newResource());
+        if (tickResourceGrid) tickResourceGrid.remove(r);
+        const replacement = newResource();
+        game.resources.push(replacement);
+        if (tickResourceGrid) tickResourceGrid.insert(replacement);
       }
     }
   }
@@ -1128,14 +1213,19 @@ function handleEjectedCollisions() {
     if (!p.alive) continue;
     for (const cell of p.cells) {
       const cr = radiusFromMass(cell.mass);
-      for (let i = game.ejected.length - 1; i >= 0; i--) {
-        const e = game.ejected[i];
+      const candidates = tickEjectedGrid
+        ? tickEjectedGrid.queryCircle(cell.x, cell.y, cr + 40)
+        : game.ejected;
+      for (const e of candidates) {
+        const i = game.ejected.indexOf(e);
+        if (i < 0) continue;
         const er = ejectedRadius(e.mass);
         const d = Math.hypot(cell.x - e.x, cell.y - e.y);
         if (d < cr + er * 0.85) {
           cell.mass += e.mass;
           addScore(p, ejectedScoreValue(e));
           game.ejected.splice(i, 1);
+          if (tickEjectedGrid) tickEjectedGrid.remove(e);
         }
       }
     }
@@ -1411,6 +1501,8 @@ function publicState(includeResources = true) {
   }));
 
   const payload = {
+    seq: tickCount,
+    serverTime: Date.now(),
     world: WORLD,
     phase: game.phase,
     phaseName: game.phaseName,
@@ -1512,6 +1604,54 @@ function publicState(includeResources = true) {
   return payload;
 }
 
+function insideArea(object, center, radius = PLAYER_AOI_RADIUS) {
+  const x = Number(object?.x);
+  const y = Number(object?.y);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return false;
+  const extra = Math.max(0, Number(object.radius) || 0);
+  const dx = x - center.x;
+  const dy = y - center.y;
+  return dx * dx + dy * dy <= (radius + extra) ** 2;
+}
+
+function serializedPlayerInsideArea(player, center, radius) {
+  return (player.cells || []).some(cell => insideArea(cell, center, radius));
+}
+
+function playerStateFor(player, includeResources, sharedState = null) {
+  const payload = { ...(sharedState || publicState(false)) };
+  const center = player.alive && player.cells.length ? centroid(player) : { x: player.x || 0, y: player.y || 0 };
+  const lc = largestCell(player);
+  const radius = PLAYER_AOI_RADIUS + (lc ? radiusFromMass(lc.mass) : PLAYER_START_RADIUS);
+
+  payload.players = payload.players.filter(other => other.id === player.id || serializedPlayerInsideArea(other, center, radius));
+  payload.ejected = payload.ejected.filter(object => insideArea(object, center, radius));
+  payload.spItems = payload.spItems.filter(object => insideArea(object, center, radius));
+  payload.pointBags = payload.pointBags.filter(object => insideArea(object, center, radius));
+  payload.aoi = { x: round2(center.x), y: round2(center.y), radius: round1(radius) };
+  delete payload.lan;
+  delete payload.preferredLan;
+  delete payload.joinUrl;
+  delete payload.spDropCooldownMs;
+  delete payload.events;
+  delete payload.metrics;
+  delete payload.port;
+
+  if (includeResources) {
+    payload.resources = game.resources
+      .filter(resource => insideArea(resource, center, radius))
+      .map(resource => ({
+        id: resource.id,
+        type: resource.type,
+        color: resource.color,
+        radius: round1(resource.radius),
+        x: Math.round(resource.x),
+        y: Math.round(resource.y),
+      }));
+  }
+  return payload;
+}
+
 io.on('connection', (socket) => {
   socket.emit('serverInfo', {
     port: PORT,
@@ -1568,7 +1708,13 @@ io.on('connection', (socket) => {
   });
 
   socket.on('joinGame', ({ name, logoIndex, color }) => {
+    if (!game.players[socket.id] && Object.keys(game.players).length >= MAX_PLAYERS) {
+      socket.emit('joinDenied', { message: `Phòng đã đủ ${MAX_PLAYERS} người chơi.` });
+      return;
+    }
     game.players[socket.id] = createPlayer(socket.id, name, logoIndex, color);
+    socket.join('players');
+    socket.join(`player:${socket.id}`);
     addEvent(`${game.players[socket.id].name} gia nhập thị trường`, 'info');
     socket.emit('joined', { id: socket.id, player: serializePlayer(game.players[socket.id]), world: WORLD });
   });
@@ -1678,13 +1824,21 @@ io.on('connection', (socket) => {
 });
 
 let tickCount = 0;
+let hostBroadcastCount = 0;
 setInterval(() => {
   if (game.running && game.gameStarted) {
     updatePhaseByTime();
-    for (const p of Object.values(game.players)) updatePlayer(p);
+    const simulationPlayers = Object.values(game.players);
+    const offset = simulationPlayers.length ? tickCount % simulationPlayers.length : 0;
+    const simulationOrder = simulationPlayers.slice(offset).concat(simulationPlayers.slice(0, offset));
+    tickResourceGrid = UniformSpatialGrid.from(game.resources);
+    for (const p of simulationOrder) updatePlayer(p);
+    tickResourceGrid = null;
     updateEjected();
     updateTemporaryObjects();
+    tickEjectedGrid = UniformSpatialGrid.from(game.ejected);
     handleEjectedCollisions();
+    tickEjectedGrid = null;
     handleSwallowing();
     updateCapturePoints();
     updateAutoMonopoly();
@@ -1692,9 +1846,32 @@ setInterval(() => {
     endMatchIfNeeded();
   }
   tickCount++;
-  io.emit('state', publicState(tickCount % RESOURCE_SYNC_EVERY === 0));
-  for (const p of Object.values(game.players)) {
-    io.to(p.id).emit('personalState', personalState(p));
+
+  const activeGame = game.running && game.gameStarted;
+  const playerEvery = activeGame ? PLAYER_NETWORK_EVERY : IDLE_NETWORK_EVERY;
+  const networkPlayers = Object.values(game.players);
+  const scheduledPlayers = networkPlayers.filter((_player, index) => (tickCount + index) % playerEvery === 0);
+  if (scheduledPlayers.length) {
+    const sharedState = publicState(false);
+    for (const player of scheduledPlayers) {
+      const includeResources = (player.networkSendCount || 0) % PLAYER_RESOURCE_EVERY === 0;
+      io.to(`player:${player.id}`).volatile.emit('playerState', playerStateFor(player, includeResources, sharedState));
+      player.networkSendCount = (player.networkSendCount || 0) + 1;
+    }
+  }
+
+  const hostEvery = activeGame ? HOST_NETWORK_EVERY : IDLE_NETWORK_EVERY;
+  if (tickCount % hostEvery === 0) {
+    const includeResources = hostBroadcastCount % HOST_RESOURCE_EVERY === 0;
+    io.to('hosts').volatile.emit('hostState', publicState(includeResources));
+    hostBroadcastCount += 1;
+  }
+
+  const personalEvery = activeGame ? PERSONAL_STATE_EVERY : IDLE_NETWORK_EVERY;
+  for (let index = 0; index < networkPlayers.length; index += 1) {
+    if ((tickCount + index + 2) % personalEvery !== 0) continue;
+    const player = networkPlayers[index];
+    io.to(`player:${player.id}`).volatile.emit('personalState', personalState(player));
   }
 }, 1000 / TICK_RATE);
 
