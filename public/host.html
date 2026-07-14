@@ -11,7 +11,7 @@
     <div class="host-auth-card">
       <div class="host-auth-icon">🔐</div>
       <h1 id="hostAuthTitle">Xác thực máy Host</h1>
-      <p id="hostAuthMessage">Nhập mã PIN của giáo viên để nhận quyền điều khiển phòng chơi.</p>
+      <p id="hostAuthMessage">Nhập mã PIN của để nhận quyền điều khiển phòng chơi.</p>
       <form id="hostAuthForm" autocomplete="off">
         <input id="hostPinInput" type="password" inputmode="numeric" maxlength="32" placeholder="Mã PIN Host" />
         <button type="submit" class="btn-primary">Nhận quyền Host</button>
@@ -54,7 +54,6 @@
             <label><input type="checkbox" data-panel="topbar" checked /> Thanh trên</label>
             <label><input type="checkbox" data-panel="sidebar" checked /> Chỉ số thị trường</label>
             <label><input type="checkbox" data-panel="bottom" checked /> Giải thích kiến thức</label>
-            <label><input type="checkbox" data-panel="vote" checked /> Bình chọn</label>
             <label><input type="checkbox" id="editJoinUrl" /> Sửa link tham gia</label>
           </div>
         </div>
@@ -115,14 +114,6 @@
       </div>
     </footer>
 
-    <section class="hc-vote hide" id="votePanel">
-      <div class="hc-card-title">Bình chọn chính sách</div>
-      <div style="font-weight:800;font-size:15px;margin-bottom:8px">Nhà nước có nên can thiệp khi một doanh nghiệp chi phối thị trường?</div>
-      <div class="vote-bar"><span>A</span><div class="vote-track"><div class="vote-fill" id="voteA"></div></div><span id="voteACount">0</span></div>
-      <div class="vote-bar"><span>B</span><div class="vote-track"><div class="vote-fill" id="voteB"></div></div><span id="voteBCount">0</span></div>
-      <div class="vote-bar"><span>C</span><div class="vote-track"><div class="vote-fill" id="voteC"></div></div><span id="voteCCount">0</span></div>
-      <div style="margin-top:8px;font-size:12px;color:var(--hc-text-muted)">A: Để thị trường tự xử lý · B: Nhà nước giữ toàn bộ · C: Nhà nước giữ khâu cốt lõi, tư nhân tham gia phần phù hợp</div>
-    </section>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
@@ -279,7 +270,7 @@
       ],
     };
 
-    const panelState = { topbar: true, sidebar: true, bottom: true, vote: true };
+    const panelState = { topbar: true, sidebar: true, bottom: true };
 
     function formatTime(ms) {
       const total = Math.max(0, Math.floor(ms / 1000));
@@ -297,7 +288,6 @@
       hostBody.classList.toggle('ui-hide-topbar', !panelState.topbar);
       hostBody.classList.toggle('ui-hide-sidebar', !panelState.sidebar);
       hostBody.classList.toggle('ui-hide-bottom', !panelState.bottom);
-      hostBody.classList.toggle('ui-hide-vote', !panelState.vote);
       document.querySelectorAll('[data-panel]').forEach(cb => {
         if (cb.type === 'checkbox') cb.checked = panelState[cb.dataset.panel];
       });
@@ -654,18 +644,10 @@
       document.getElementById('hostCaptureHud').innerHTML = (state.capturePoints || []).map(point => `
         <div class="capture-hud-item ${point.status}" style="--point-color:${point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8'}">
           <span>${point.icon}</span><strong>${point.name}</strong>
-          <small>${point.contested ? 'TRANH CHẤP' : point.capturingPlayerName ? `${point.capturingPlayerName} · ${point.progress}%` : point.ownerPlayerName || 'Trung lập'}</small>
+          <small>${point.contested ? 'TRANH CHẤP' : point.decaying ? `${point.capturingPlayerName} MẤT TIẾN TRÌNH · ${point.progress}%` : point.capturingPlayerName ? `${point.capturingPlayerName} · ${point.progress}%` : point.ownerPlayerName || 'Trung lập'}</small>
         </div>
       `).join('');
 
-      const vp = document.getElementById('votePanel');
-      const showVote = state.phase === 4 && panelState.vote && state.gameStarted;
-      vp.classList.toggle('hide', !showVote);
-      const total = Math.max(1, state.voteCounts.A + state.voteCounts.B + state.voteCounts.C);
-      ['A', 'B', 'C'].forEach(k => {
-        document.getElementById(`vote${k}`).style.width = `${state.voteCounts[k] / total * 100}%`;
-        document.getElementById(`vote${k}Count`).textContent = state.voteCounts[k];
-      });
     }
 
     let lastUiUpdate = 0;

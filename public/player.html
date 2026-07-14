@@ -163,12 +163,6 @@
         </div>
       </div>
 
-      <div class="panel vote-buttons hide" id="voteButtons">
-        <div class="section-title">Vote chính sách</div>
-        <button data-vote="A" class="secondary">A. Không can thiệp, để thị trường tự xử lý</button>
-        <button data-vote="B" class="secondary">B. Nhà nước giữ toàn bộ</button>
-        <button data-vote="C" class="green">C. Nhà nước giữ khâu cốt lõi, tư nhân tham gia phần phù hợp</button>
-      </div>
     </section>
   </main>
 
@@ -185,13 +179,11 @@
     let viewportSize = { width: 1, height: 1, dpr: 1 };
     let lastFrameTs = 0;
     let focusCellId = null;
-    let currentVote = null;
     let selectedColor = '#3B82F6';
     const onboarding = document.getElementById('onboarding');
     const hud = document.getElementById('hud');
     const joystick = document.getElementById('joystick');
     const knob = document.getElementById('knob');
-    const voteButtons = document.getElementById('voteButtons');
     const viewCanvas = document.getElementById('viewCanvas');
     const viewCtx = viewCanvas.getContext('2d');
     const viewportOverlay = document.getElementById('viewportOverlay');
@@ -294,7 +286,6 @@
         lastPlayerUiUpdate = now;
         const me = state.players.find(p => p.id === myId);
         document.getElementById('phaseText').textContent = `Giai đoạn ${state.phase} · ${state.phaseName}`;
-        voteButtons.classList.toggle('hide', state.phase !== 4);
         if (me) {
           document.getElementById('massDisplay').textContent = Math.round(me.score);
           viewportStats.textContent = `Thâu tóm: ${me.swallowed} · Bị thâu tóm: ${me.swallowedBy}`;
@@ -620,7 +611,7 @@
     function renderCaptureHud(points, me) {
       captureStatusStrip.innerHTML = points.map(point => `
         <div class="capture-status-item ${point.status}" style="--point-color:${point.contested ? '#EF4444' : point.capturingColor || point.ownerColor || '#94A3B8'}">
-          <span>${point.icon}</span><b>${point.name}</b><small>${point.contested ? 'Tranh chấp' : point.capturingPlayerName ? `${point.capturingPlayerName} · ${point.progress}%` : point.ownerPlayerName || 'Trung lập'}</small>
+          <span>${point.icon}</span><b>${point.name}</b><small>${point.contested ? 'Tranh chấp' : point.decaying ? `${point.capturingPlayerName} đang mất tiến trình · ${point.progress}%` : point.capturingPlayerName ? `${point.capturingPlayerName} · ${point.progress}%` : point.ownerPlayerName || 'Trung lập'}</small>
         </div>
       `).join('');
       const pointMarkers = points.map(point => `
@@ -640,7 +631,9 @@
       captureProgress.classList.toggle('contested', active.contested);
       captureProgressTitle.textContent = active.contested
         ? 'CỨ ĐIỂM ĐANG BỊ TRANH CHẤP!'
-        : `${me?.name || 'Bạn'} đang chiếm ${active.name}`;
+        : active.decaying
+          ? `${me?.name || 'Bạn'} đang mất tiến trình chiếm ${active.name}`
+          : `${me?.name || 'Bạn'} đang chiếm ${active.name}`;
       captureProgressFill.style.width = `${active.progress}%`;
       captureProgressMeta.textContent = `${active.progress}% — Còn ${Math.ceil(active.remainingMs / 1000)} giây`;
     }
@@ -963,13 +956,6 @@
       }
     });
 
-    document.querySelectorAll('[data-vote]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        currentVote = btn.dataset.vote;
-        socket.emit('vote', { option: currentVote });
-        document.querySelectorAll('[data-vote]').forEach(b => b.classList.toggle('selected', b.dataset.vote === currentVote));
-      });
-    });
   </script>
 </body>
 </html>
