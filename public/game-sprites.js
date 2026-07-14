@@ -274,6 +274,7 @@ window.GameSprites = (() => {
     const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const delay = options.delay ?? 80;
     const max = options.max ?? 16;
+    const maxAlpha = Math.max(1, options.extrapolate ?? 1.25);
     const snapThreshold = options.snap ?? 300;
     const snapSq = snapThreshold * snapThreshold;
     const buffer = [];
@@ -300,7 +301,7 @@ window.GameSprites = (() => {
 
       const span = newer.t - older.t || 1;
       let alpha = (t - older.t) / span;
-      alpha = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+      alpha = alpha < 0 ? 0 : alpha > maxAlpha ? maxAlpha : alpha;
 
       const olderById = new Map();
       for (const p of older.players) olderById.set(p.id, p);

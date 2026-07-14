@@ -117,7 +117,7 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
-  <script src="/game-sprites.js?v=20260711-4"></script>
+  <script src="/game-sprites.js?v=20260714-2"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
@@ -210,7 +210,7 @@
 
     let state = null;
     let resourceCache = [];
-    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 80 });
+    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 50, extrapolate: 1.35 });
     let camera = { x: 0, y: 0, scale: 0.58 };
     let lastJoinUrl = '';
     const mapImage = new Image();
@@ -651,7 +651,10 @@
     }
 
     let lastUiUpdate = 0;
-    socket.on('state', s => {
+    let lastStateSeq = -1;
+    function acceptHostState(s) {
+      if (!s || (Number.isFinite(s.seq) && s.seq <= lastStateSeq)) return;
+      if (Number.isFinite(s.seq)) lastStateSeq = s.seq;
       state = s;
       if (s.resources) resourceCache = s.resources;
       if (s.players) playerBuffer.push(s.players);
@@ -662,7 +665,10 @@
         lastUiUpdate = now;
         updateUI();
       }
-    });
+    }
+
+    socket.on('hostState', acceptHostState);
+    socket.on('state', acceptHostState);
 
     let hostToastTimer = null;
     socket.on('notice', notice => {
