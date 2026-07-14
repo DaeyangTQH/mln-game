@@ -775,10 +775,9 @@
       const nowTs = frameNow;
       const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
       lastFrameTs = nowTs;
-      const prediction = predictedSelfPosition(subjectInterp, serverMe);
-      if (!selfRender) selfRender = { x: prediction.x, y: prediction.y, radius: subjectInterp.radius };
-      const dxs = prediction.x - selfRender.x;
-      const dys = prediction.y - selfRender.y;
+      if (!selfRender) selfRender = { x: subjectInterp.x, y: subjectInterp.y, radius: subjectInterp.radius };
+      const dxs = subjectInterp.x - selfRender.x;
+      const dys = subjectInterp.y - selfRender.y;
       if (dxs * dxs + dys * dys > 300 * 300) {
         selfRender.x = subjectInterp.x;
         selfRender.y = subjectInterp.y;
@@ -849,12 +848,7 @@
       if (me.alive) {
         const myCells = playerCells(interpMe).slice().sort((a, b) => a.radius - b.radius);
         for (const cell of myCells) {
-          const predictedCell = {
-            ...cell,
-            x: cell.x + (selfRender.x - subjectInterp.x),
-            y: cell.y + (selfRender.y - subjectInterp.y),
-          };
-          const { sp, sr } = drawCell(viewCtx, me, predictedCell, camera, { highlight: true });
+          const { sp, sr } = drawCell(viewCtx, me, cell, camera, { highlight: true });
           drawNameInsideCell(viewCtx, me.name, sp.x, sp.y, sr);
         }
       }
@@ -870,28 +864,6 @@
     let controlTimer = null;
 
     let lastControl = { x: 999999, y: 999999 };
-    let hasControlTarget = false;
-
-    function predictedSelfPosition(subject, serverPlayer) {
-      if (!hasControlTarget || !serverPlayer?.alive) return { x: subject.x, y: subject.y };
-      const dx = lastControl.x - subject.x;
-      const dy = lastControl.y - subject.y;
-      const distance = Math.hypot(dx, dy);
-      if (distance < 1) return { x: subject.x, y: subject.y };
-      const cells = playerCells(serverPlayer);
-      const representative = cells.length
-        ? cells.reduce((largest, cell) => cell.mass > largest.mass ? cell : largest, cells[0])
-        : { mass: serverPlayer.mass || 100 };
-      const size = Math.max(1, Math.floor(Math.sqrt(100 * Math.max(1, representative.mass || 100))));
-      const unitsPerSecond = ((30 * 1.6) / Math.pow(size, 0.32)) * 1.2 * 30;
-      const leadSeconds = Math.min(0.18, (INTERPOLATION_DELAY_MS + Math.min(180, pingMs || 0) * 0.5) / 1000);
-      const lead = Math.min(distance, unitsPerSecond * leadSeconds);
-      return {
-        x: subject.x + (dx / distance) * lead,
-        y: subject.y + (dy / distance) * lead,
-      };
-    }
-
     function cameraMe() {
       const serverMe = state?.players?.find(p => p.id === myId);
       if (!serverMe) return null;
@@ -923,7 +895,6 @@
       if (Math.abs(wx - lastControl.x) < 2 && Math.abs(wy - lastControl.y) < 2) return;
       lastControl.x = wx;
       lastControl.y = wy;
-      hasControlTarget = true;
       socket.emit('control', { x: wx, y: wy });
     }
 
@@ -940,7 +911,6 @@
         const len = Math.hypot(joystickDir.x, joystickDir.y);
         if (len < 0.05) {
           emitControlTarget(me.x, me.y);
-          hasControlTarget = false;
           return;
         }
         emitControlTarget(
