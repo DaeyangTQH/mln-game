@@ -105,13 +105,13 @@ const RESOURCE_HITBOX_SCALE = 1.18;
 const MONOPOLY_SHARE_WARNING = 0.45;
 const MONOPOLY_SHARE_DANGER = 0.65;
 const RESOURCE_SYNC_EVERY = 3;
-const PLAYER_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.PLAYER_NETWORK_RATE) || 30));
-const HOST_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.HOST_NETWORK_RATE) || 30));
+const PLAYER_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.PLAYER_NETWORK_RATE) || 15));
+const HOST_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.HOST_NETWORK_RATE) || 10));
 const IDLE_NETWORK_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.IDLE_NETWORK_RATE) || 2));
 const PERSONAL_STATE_RATE = Math.max(1, Math.min(TICK_RATE, Number(process.env.PERSONAL_STATE_RATE) || 5));
 const PLAYER_AOI_RADIUS = Math.max(400, Number(process.env.PLAYER_AOI_RADIUS) || 900);
-const PLAYER_RESOURCE_RATE = Math.max(1, Number(process.env.PLAYER_RESOURCE_RATE) || 3);
-const HOST_RESOURCE_RATE = Math.max(1, Number(process.env.HOST_RESOURCE_RATE) || 5);
+const PLAYER_RESOURCE_RATE = Math.max(1, Number(process.env.PLAYER_RESOURCE_RATE) || 2);
+const HOST_RESOURCE_RATE = Math.max(1, Number(process.env.HOST_RESOURCE_RATE) || 2);
 const PLAYER_NETWORK_EVERY = Math.max(1, Math.round(TICK_RATE / PLAYER_NETWORK_RATE));
 const HOST_NETWORK_EVERY = Math.max(1, Math.round(TICK_RATE / HOST_NETWORK_RATE));
 const IDLE_NETWORK_EVERY = Math.max(1, Math.round(TICK_RATE / IDLE_NETWORK_RATE));
@@ -1992,6 +1992,7 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`\nMonopoly Market Arena running!`);
   console.log(`Host screen: http://localhost:${PORT}/host`);
   console.log(`Player screen: http://localhost:${PORT}/player`);
+  console.log(`Network sync targets: player ${PLAYER_NETWORK_RATE}Hz, host ${HOST_NETWORK_RATE}Hz, resources ${PLAYER_RESOURCE_RATE}/${HOST_RESOURCE_RATE}Hz`);
   if (lan.length) {
     console.log(`\nLocal network URLs:`);
     lan.forEach(ip => console.log(`Host:   http://${ip}:${PORT}/host\nPlayer: http://${ip}:${PORT}/player`));
