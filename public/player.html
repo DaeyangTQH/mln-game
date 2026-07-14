@@ -28,6 +28,7 @@
         <div class="color-swatches" id="colorSwatches"></div>
       </div>
       <button id="joinBtn" style="width:100%">Gia nhập thị trường</button>
+      <div class="join-message" id="joinMessage" role="alert" aria-live="polite"></div>
       <p class="small" style="margin-top:12px">Gợi ý tên: Tổng tài Aqua, Điện Sấm Sét, Nước Đại Phát, Market Boss...</p>
     </section>
 
@@ -170,6 +171,7 @@
   <script src="/socket.io/socket.io.js"></script>
   <script>
     const socket = io();
+    const PLAYER_TOKEN_KEY = 'mlnGamePlayerResumeToken';
     let myId = null;
     let state = null;
     let resourceCache = [];
@@ -182,6 +184,7 @@
     let selectedColor = '#3B82F6';
     const onboarding = document.getElementById('onboarding');
     const hud = document.getElementById('hud');
+    const joinMessage = document.getElementById('joinMessage');
     const joystick = document.getElementById('joystick');
     const knob = document.getElementById('knob');
     const viewCanvas = document.getElementById('viewCanvas');
@@ -224,9 +227,20 @@
 
     function join() {
       const name = document.getElementById('nameInput').value.trim() || 'Doanh nghiệp mới';
+      showJoinMessage('');
       socket.emit('joinGame', { name, color: selectedColor });
       document.getElementById('joinBtn').textContent = 'Đang vào thị trường...';
     }
+
+    function showJoinMessage(message) {
+      joinMessage.textContent = message || '';
+      joinMessage.classList.toggle('show', !!message);
+    }
+
+    socket.on('connect', () => {
+      const resumeToken = localStorage.getItem(PLAYER_TOKEN_KEY);
+      if (resumeToken) socket.emit('player:resume', { resumeToken });
+    });
 
     function hexToRgb(hex) {
       const clean = String(hex || '').replace('#', '');
@@ -261,7 +275,9 @@
       setSelectedColor(selectedColor);
     }
 
-    socket.on('joined', ({ id, player }) => {
+    socket.on('joined', ({ id, player, resumeToken }) => {
+      if (resumeToken) localStorage.setItem(PLAYER_TOKEN_KEY, resumeToken);
+      showJoinMessage('');
       myId = id;
       document.body.classList.add('player-playing');
       onboarding.classList.add('hide');
@@ -279,7 +295,12 @@
 
     socket.on('joinDenied', ({ message } = {}) => {
       document.getElementById('joinBtn').textContent = 'Vào thị trường';
-      showNotice(message || 'Không thể tham gia phòng.', 'warn');
+      showJoinMessage(message || 'Không thể tham gia phòng.');
+    });
+
+    socket.on('player:resumeDenied', ({ message } = {}) => {
+      localStorage.removeItem(PLAYER_TOKEN_KEY);
+      if (message) showJoinMessage(message);
     });
 
     function acceptPlayerState(s) {

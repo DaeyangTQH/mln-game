@@ -25,6 +25,7 @@ app.get('/player', (_req, res) => {
 const PORT = process.env.PORT || 3000;
 const HOST_PIN = String(process.env.HOST_PIN || '2468');
 const HOST_RECONNECT_GRACE_MS = Math.max(5000, Number(process.env.HOST_RECONNECT_GRACE_MS) || 30000);
+const PLAYER_RECONNECT_GRACE_MS = Math.max(30000, Number(process.env.PLAYER_RECONNECT_GRACE_MS) || 5 * 60 * 1000);
 const MAX_PLAYERS = Math.max(1, Number.parseInt(process.env.MAX_PLAYERS || '50', 10) || 50);
 const hostAccess = {
   deviceTokenHash: null,
@@ -36,6 +37,10 @@ const hostAccess = {
 };
 
 function hashHostToken(token) {
+  return crypto.createHash('sha256').update(String(token || '')).digest('hex');
+}
+
+function hashPlayerToken(token) {
   return crypto.createHash('sha256').update(String(token || '')).digest('hex');
 }
 
@@ -361,7 +366,7 @@ function subtractScorePercent(p, percent, redistribute = false) {
 }
 
 function notifyPlayer(playerId, message, kind = 'info') {
-  io.to(playerId).emit('notice', { message, kind, at: Date.now(), scope: 'personal' });
+  io.to(`player:${playerId}`).emit('notice', { message, kind, at: Date.now(), scope: 'personal' });
 }
 
 function notifyAll(message, kind = 'info') {
@@ -651,6 +656,10 @@ function createPlayer(socketId, name, logoIndex = 0, color = null) {
     lastSplitAt: 0,
     lastEjectAt: 0,
     networkSendCount: 0,
+    socketId: null,
+    resumeTokenHash: null,
+    disconnectedAt: null,
+    disconnectTimer: null,
     effects: {
       resourceBoostUntil: 0,
       shieldUntil: 0,
@@ -1238,6 +1247,7 @@ function handleSwallowing() {
 
   const alive = Object.values(game.players).filter(p => p.alive && p.cells.length);
   const allCells = [];
+  const swallowedCellIds = new Set();
   for (const p of alive) {
     for (const c of p.cells) allCells.push({ cell: c, player: p });
   }
@@ -1247,6 +1257,8 @@ function handleSwallowing() {
       const { cell: a, player: pa } = allCells[i];
       const { cell: b, player: pb } = allCells[j];
       if (pa.id === pb.id) continue;
+      if (swallowedCellIds.has(a.id) || swallowedCellIds.has(b.id)) continue;
+      if (!pa.cells.some(cell => cell.id === a.id) || !pb.cells.some(cell => cell.id === b.id)) continue;
 
       const ra = radiusFromMass(a.mass);
       const rb = radiusFromMass(b.mass);
@@ -1268,10 +1280,30 @@ function handleSwallowing() {
       if (activeUntil(smallPlayer, 'shieldUntil', now)) continue;
       if (activeUntil(bigPlayer, 'noSwallowUntil', now)) continue;
 
+      const smallPlayerMassBefore = totalMass(smallPlayer);
+      const swallowedScore = smallPlayerMassBefore > 0
+        ? smallPlayer.score * (smallCell.mass / smallPlayerMassBefore)
+        : 0;
+      const transferredScore = swallowedScore * SWALLOW_MASS_TRANSFER;
+
       bigCell.mass += smallCell.mass * SWALLOW_MASS_TRANSFER;
       smallPlayer.cells = smallPlayer.cells.filter(c => c.id !== smallCell.id);
+      swallowedCellIds.add(smallCell.id);
 
-      if (!smallPlayer.cells.length) {
+      if (smallPlayer.cells.length) {
+        addScore(smallPlayer, -swallowedScore);
+        addScore(bigPlayer, transferredScore);
+        notifyPlayer(
+          bigPlayer.id,
+          `Ăn một cell của ${smallPlayer.name}: +${Math.round(transferredScore)} điểm`,
+          'success',
+        );
+        notifyPlayer(
+          smallPlayer.id,
+          `Một cell bị ${bigPlayer.name} ăn: -${Math.round(swallowedScore)} điểm`,
+          'warn',
+        );
+      } else {
         bigPlayer.score += 18;
         bigPlayer.swallowed += 1;
         smallPlayer.swallowedBy += 1;
@@ -1666,7 +1698,8 @@ io.on('connection', (socket) => {
     });
   });
 
-  socket.on('host:claim', ({ pin } = {}) => {
+  socket.on('host:claim', (payload = {}) => {
+    const pin = payload && typeof payload === 'object' ? payload.pin : '';
     if (!safeEqual(pin, HOST_PIN)) {
       socket.emit('host:denied', { code: 'INVALID_PIN', message: 'Mã PIN Host không đúng.' });
       return;
@@ -1683,7 +1716,8 @@ io.on('connection', (socket) => {
     socket.emit('host:token', { deviceToken });
   });
 
-  socket.on('host:resume', ({ deviceToken } = {}) => {
+  socket.on('host:resume', (payload = {}) => {
+    const deviceToken = payload && typeof payload === 'object' ? payload.deviceToken : '';
     if (!tokenOwnsHost(deviceToken)) {
       socket.emit('host:denied', {
         code: hostAccess.deviceTokenHash ? 'HOST_OCCUPIED' : 'TOKEN_EXPIRED',
@@ -1692,13 +1726,14 @@ io.on('connection', (socket) => {
       return;
     }
     if (hostAccess.connected && hostAccess.socketId !== socket.id) {
-      socket.emit('host:denied', { code: 'HOST_OCCUPIED', message: 'Host đang mở trong một tab hoặc thiết bị khác.' });
-      return;
+      const previousSocket = io.sockets.sockets.get(hostAccess.socketId);
+      if (previousSocket) previousSocket.disconnect(true);
     }
     authorizeHostSocket(socket);
   });
 
-  socket.on('host:release', ({ deviceToken } = {}) => {
+  socket.on('host:release', (payload = {}) => {
+    const deviceToken = payload && typeof payload === 'object' ? payload.deviceToken : '';
     if (!isAuthorizedHost(socket) || !tokenOwnsHost(deviceToken)) {
       socket.emit('host:denied', { code: 'NOT_AUTHORIZED', message: 'Bạn không có quyền giải phóng Host.' });
       return;
@@ -1707,29 +1742,64 @@ io.on('connection', (socket) => {
     socket.emit('host:released');
   });
 
-  socket.on('joinGame', ({ name, logoIndex, color }) => {
+  function bindPlayer(player) {
+    if (player.disconnectTimer) clearTimeout(player.disconnectTimer);
+    player.disconnectTimer = null;
+    player.disconnectedAt = null;
+    player.socketId = socket.id;
+    socket.data.playerId = player.id;
+    socket.join('players');
+    socket.join(`player:${player.id}`);
+  }
+
+  socket.on('player:resume', (payload = {}) => {
+    const resumeToken = payload && typeof payload === 'object' ? payload.resumeToken : '';
+    const tokenHash = hashPlayerToken(resumeToken);
+    const player = Object.values(game.players).find(p => p.resumeTokenHash && safeEqual(tokenHash, p.resumeTokenHash));
+    if (!player) {
+      socket.emit('player:resumeDenied', { message: 'Phiên người chơi không còn tồn tại.' });
+      return;
+    }
+    if (player.socketId && player.socketId !== socket.id) {
+      const previousSocket = io.sockets.sockets.get(player.socketId);
+      if (previousSocket) previousSocket.disconnect(true);
+    }
+    bindPlayer(player);
+    socket.emit('joined', { id: player.id, player: serializePlayer(player), world: WORLD, resumed: true });
+  });
+
+  socket.on('joinGame', (payload = {}) => {
+    const { name, logoIndex, color } = payload && typeof payload === 'object' ? payload : {};
+    if (socket.data.playerId && game.players[socket.data.playerId]) {
+      socket.emit('joinDenied', { code: 'ALREADY_JOINED', message: 'Thiết bị này đã ở trong phòng.' });
+      return;
+    }
     if (game.gameStarted) {
       socket.emit('joinDenied', {
         code: 'GAME_ALREADY_STARTED',
         message: game.gameEnded
           ? 'Trận đấu đã kết thúc. Vui lòng chờ Host chọn Chơi lại.'
-          : 'Trận đấu đã bắt đầu, bạn không thể tham gia lúc này.',
+          : 'Phòng đang có trận đấu diễn ra. Vui lòng chờ Host bắt đầu lượt chơi mới.',
       });
       return;
     }
-    if (!game.players[socket.id] && Object.keys(game.players).length >= MAX_PLAYERS) {
+    if (Object.keys(game.players).length >= MAX_PLAYERS) {
       socket.emit('joinDenied', { code: 'ROOM_FULL', message: `Phòng đã đủ ${MAX_PLAYERS} người chơi.` });
       return;
     }
-    game.players[socket.id] = createPlayer(socket.id, name, logoIndex, color);
-    socket.join('players');
-    socket.join(`player:${socket.id}`);
-    addEvent(`${game.players[socket.id].name} gia nhập thị trường`, 'info');
-    socket.emit('joined', { id: socket.id, player: serializePlayer(game.players[socket.id]), world: WORLD });
+    const playerId = crypto.randomUUID();
+    const resumeToken = crypto.randomBytes(32).toString('hex');
+    const player = createPlayer(playerId, name, logoIndex, color);
+    player.resumeTokenHash = hashPlayerToken(resumeToken);
+    game.players[playerId] = player;
+    bindPlayer(player);
+    addEvent(`${player.name} gia nhập thị trường`, 'info');
+    socket.emit('joined', { id: playerId, player: serializePlayer(player), world: WORLD, resumeToken });
   });
 
-  socket.on('control', ({ x = 0, y = 0 }) => {
-    const p = game.players[socket.id];
+  socket.on('control', (payload = {}) => {
+    const { x = 0, y = 0 } = payload && typeof payload === 'object' ? payload : {};
+    const p = game.players[socket.data.playerId];
     if (!p || !game.gameStarted) return;
     p.mouseX = x;
     p.mouseY = y;
@@ -1745,8 +1815,9 @@ io.on('connection', (socket) => {
     }
   });
 
-  socket.on('action', ({ action }) => {
-    const p = game.players[socket.id];
+  socket.on('action', (payload = {}) => {
+    const action = payload && typeof payload === 'object' ? payload.action : '';
+    const p = game.players[socket.data.playerId];
     if (!p || !game.gameStarted || !game.running || !p.alive) return;
     if (action === 'split') splitPlayer(p);
     if (action === 'eject') ejectMass(p);
@@ -1806,10 +1877,24 @@ io.on('connection', (socket) => {
     }
     if (action === 'reset') {
       const customJoinUrl = game.customJoinUrl;
-      const oldPlayers = Object.values(game.players).map(p => ({ id: p.id, name: p.name, color: p.color, logoIndex: p.logoIndex }));
+      const oldPlayers = Object.values(game.players).map(p => ({
+        id: p.id,
+        name: p.name,
+        color: p.color,
+        logoIndex: p.logoIndex,
+        socketId: p.socketId,
+        resumeTokenHash: p.resumeTokenHash,
+        disconnectedAt: p.disconnectedAt,
+        disconnectTimer: p.disconnectTimer,
+      }));
       game = createGame({ customJoinUrl });
       for (const old of oldPlayers) {
-        game.players[old.id] = createPlayer(old.id, old.name, old.logoIndex, old.color);
+        const player = createPlayer(old.id, old.name, old.logoIndex, old.color);
+        player.socketId = old.socketId;
+        player.resumeTokenHash = old.resumeTokenHash;
+        player.disconnectedAt = old.disconnectedAt;
+        player.disconnectTimer = old.disconnectTimer;
+        game.players[old.id] = player;
       }
       addEvent('Đã chơi lại từ đầu — đang chờ bắt đầu', 'warn');
     }
@@ -1825,9 +1910,23 @@ io.on('connection', (socket) => {
         if (!hostAccess.connected && hostAccess.disconnectedAt) releaseHostLease();
       }, HOST_RECONNECT_GRACE_MS);
     }
-    if (game.players[socket.id]) {
-      addEvent(`${game.players[socket.id].name} rời thị trường`, 'warn');
-      delete game.players[socket.id];
+    const playerId = socket.data.playerId;
+    const player = game.players[playerId];
+    if (player && player.socketId === socket.id) {
+      player.socketId = null;
+      player.disconnectedAt = Date.now();
+      player.dirX = 0;
+      player.dirY = 0;
+      const reconnectGraceMs = game.gameStarted
+        ? Math.max(PLAYER_RECONNECT_GRACE_MS, game.sessionDurationMs + 60 * 1000)
+        : PLAYER_RECONNECT_GRACE_MS;
+      player.disconnectTimer = setTimeout(() => {
+        const current = game.players[playerId];
+        if (current && !current.socketId && current.disconnectedAt) {
+          addEvent(`${current.name} rời thị trường`, 'warn');
+          delete game.players[playerId];
+        }
+      }, reconnectGraceMs);
     }
   });
 });

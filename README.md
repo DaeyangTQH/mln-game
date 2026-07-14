@@ -24,11 +24,11 @@ Màn hình người chơi:
 http://localhost:3000/player
 ```
 
-Nếu chơi cùng mạng LAN, host sẽ hiện QR/link tham gia. Người chơi dùng điện thoại hoặc laptop để vào link `/player`.
+Nếu chơi cùng mạng LAN, host sẽ hiện link tham gia. Người chơi dùng điện thoại hoặc laptop để vào link `/player`.
 
 ## Cấu trúc màn hình
 
-- `/host`: màn hình lớp học, hiện bản đồ lớn, bảng xếp hạng, chỉ số thị trường, QR tham gia, nút điều khiển game.
+- `/host`: màn hình lớp học, hiện bản đồ lớn, bảng xếp hạng, chỉ số thị trường, link tham gia, nút điều khiển game.
 - `/player`: màn hình người chơi, nhập tên doanh nghiệp, chọn logo, điều khiển nhân vật, nhìn vùng xung quanh mình.
 
 ## Mục tiêu chiến thắng
@@ -340,7 +340,7 @@ Host có các nút:
 
 Host thấy:
 
-- QR/link để người chơi tham gia.
+- Link để người chơi tham gia.
 - Đồng hồ đếm ngược.
 - Bản đồ toàn cảnh.
 - Leaderboard.

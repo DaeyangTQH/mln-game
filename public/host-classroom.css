@@ -147,33 +147,18 @@ body.host-classroom {
   min-width: 64px;
   text-align: center;
 }
-.host-classroom .hc-qr-wrap {
+.host-classroom .hc-join-wrap {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  gap: 2px;
   background: rgba(255,255,255,.12);
   border-radius: 12px;
-  padding: 6px 10px;
-}
-.host-classroom #qrCode {
-  width: 72px;
-  height: 72px;
-  background: #fff;
-  border-radius: 8px;
-  padding: 4px;
-  flex-shrink: 0;
-}
-.host-classroom #qrCode canvas,
-.host-classroom #qrCode img {
-  width: 100% !important;
-  height: 100% !important;
-}
-.host-classroom .hc-qr-text {
+  padding: 7px 10px;
   font-size: 12px;
   line-height: 1.35;
   max-width: 200px;
 }
-.host-classroom .hc-qr-text strong { display: block; font-size: 13px; }
+.host-classroom .hc-join-wrap strong { font-size: 13px; }
 .host-classroom .hc-join-link {
   font-size: 11px;
   word-break: break-all;

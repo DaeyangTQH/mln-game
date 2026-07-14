@@ -29,13 +29,9 @@
       <div class="hc-divider"></div>
       <div class="hc-timer" id="timerDisplay">05:00</div>
       <div class="hc-divider"></div>
-      <div class="hc-qr-wrap">
-        <div id="qrCode" title="Quét QR để tham gia"></div>
-        <div class="hc-qr-text">
-          <strong>Quét QR để tham gia</strong>
-          <span id="qrPlayerNote">0 người đã vào phòng</span>
-          <span class="hc-join-link" id="joinUrl" title="Nhấn để sửa link">http://localhost:3000/player</span>
-        </div>
+      <div class="hc-join-wrap">
+        <strong>Link tham gia</strong>
+        <span class="hc-join-link" id="joinUrl" title="Nhấn để sửa link">http://localhost:3000/player</span>
       </div>
       <div class="join-url-edit" id="joinUrlEdit">
         <input type="url" id="joinUrlInput" placeholder="http://192.168.x.x:3000/player" />
@@ -68,7 +64,7 @@
         <div class="hc-lobby-overlay" id="lobbyOverlay">
           <div>
             <h2>Đang chờ người chơi…</h2>
-            <p>Quét QR để tham gia · <span id="lobbyCount">0</span> người đã vào phòng</p>
+            <p>Đang có <span id="lobbyCount">0</span> người trong phòng</p>
             <button type="button" class="btn-primary" id="startGameLobby">Bắt đầu game</button>
           </div>
         </div>
@@ -116,7 +112,6 @@
 
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
   <script src="/game-sprites.js?v=20260714-2"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
@@ -212,7 +207,6 @@
     let resourceCache = [];
     const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 50, extrapolate: 1.35 });
     let camera = { x: 0, y: 0, scale: 0.58 };
-    let lastJoinUrl = '';
     const mapImage = new Image();
     let mapReady = false;
     mapImage.onload = () => { mapReady = true; };
@@ -566,18 +560,6 @@
     }
     render();
 
-    function renderQr(url) {
-      if (!url || url === lastJoinUrl) return;
-      lastJoinUrl = url;
-      const el = document.getElementById('qrCode');
-      el.innerHTML = '';
-      if (typeof QRCode !== 'undefined') {
-        QRCode.toCanvas(url, { width: 64, margin: 1, color: { dark: '#23352F', light: '#FFFFFF' } }, (err, canvasEl) => {
-          if (!err && canvasEl) el.appendChild(canvasEl);
-        });
-      }
-    }
-
     function renderExplainGrid(phase) {
       const info = PHASE_EXPLAIN[phase] || PHASE_EXPLAIN[1];
       document.getElementById('explainGrid').innerHTML = info.cards.map(card => `
@@ -595,11 +577,8 @@
       document.getElementById('phaseStat').textContent = phaseLabel;
       document.getElementById('playerCount').textContent = state.playerCount ?? state.players.length;
       document.getElementById('lobbyCount').textContent = state.playerCount ?? state.players.length;
-      document.getElementById('qrPlayerNote').textContent = `${state.playerCount ?? state.players.length} người đã vào phòng`;
-
       const joinUrl = state.joinUrl || new URL('/player', location.origin).href;
-      document.getElementById('joinUrl').textContent = `Link dự phòng: ${joinUrl}`;
-      renderQr(joinUrl);
+      document.getElementById('joinUrl').textContent = joinUrl;
 
       const inLobby = !state.gameStarted;
       document.getElementById('lobbyOverlay').classList.toggle('hide', !inLobby);
@@ -709,7 +688,6 @@
     document.getElementById('saveJoinUrl').onclick = () => {
       const url = document.getElementById('joinUrlInput').value.trim();
       socket.emit('hostAction', { action: 'setJoinUrl', url });
-      lastJoinUrl = '';
     };
 
     document.getElementById('toggleExplain').onclick = () => {

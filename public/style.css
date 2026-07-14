@@ -510,6 +510,19 @@ body.player-playing .player-page {
   filter: saturate(1.08);
   box-shadow: 0 20px 38px rgba(37,99,235,.28);
 }
+.join-message {
+  display: none;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid #e8c4bc;
+  border-radius: 14px;
+  background: rgba(240, 221, 216, .96);
+  color: #8b4f42;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.45;
+}
+.join-message.show { display: block; }
 .quick-guide {
   min-width: 0;
   min-height: 0;
