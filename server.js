@@ -1708,8 +1708,17 @@ io.on('connection', (socket) => {
   });
 
   socket.on('joinGame', ({ name, logoIndex, color }) => {
+    if (game.gameStarted) {
+      socket.emit('joinDenied', {
+        code: 'GAME_ALREADY_STARTED',
+        message: game.gameEnded
+          ? 'Trận đấu đã kết thúc. Vui lòng chờ Host chọn Chơi lại.'
+          : 'Trận đấu đã bắt đầu, bạn không thể tham gia lúc này.',
+      });
+      return;
+    }
     if (!game.players[socket.id] && Object.keys(game.players).length >= MAX_PLAYERS) {
-      socket.emit('joinDenied', { message: `Phòng đã đủ ${MAX_PLAYERS} người chơi.` });
+      socket.emit('joinDenied', { code: 'ROOM_FULL', message: `Phòng đã đủ ${MAX_PLAYERS} người chơi.` });
       return;
     }
     game.players[socket.id] = createPlayer(socket.id, name, logoIndex, color);
