@@ -1691,6 +1691,10 @@ io.on('connection', (socket) => {
     world: WORLD,
   });
 
+  socket.on('diagnostic:ping', (clientSentAt, acknowledge) => {
+    if (typeof acknowledge === 'function') acknowledge({ clientSentAt, serverTime: Date.now() });
+  });
+
   socket.on('host:status', () => {
     socket.emit('host:status', {
       status: hostAccess.deviceTokenHash ? 'occupied' : 'available',

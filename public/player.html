@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Nuốt Thị Trường - Player</title>
-  <link rel="stylesheet" href="/style.css?v=20260711-6" />
+  <link rel="stylesheet" href="/style.css?v=20260714-7" />
 </head>
 <body>
   <main class="player-page">
@@ -129,6 +129,7 @@
         <div>
           <h2 id="playerName">Doanh nghiệp</h2>
           <div class="sub" id="phaseText">Giai đoạn 1 · Cạnh tranh tự do</div>
+          <div class="network-diagnostics" id="networkDiagnostics">FPS -- · Ping -- · Jitter --</div>
         </div>
       </div>
       <div class="player-effects" id="effectPanel"></div>
@@ -170,12 +171,13 @@
   <script src="/game-sprites.js?v=20260714-2"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
-    const socket = io();
+    const socket = io({ autoConnect: false });
     const PLAYER_TOKEN_KEY = 'mlnGamePlayerResumeToken';
     let myId = null;
     let state = null;
     let resourceCache = [];
-    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: 50, extrapolate: 1.4 });
+    const INTERPOLATION_DELAY_MS = 90;
+    const playerBuffer = GameSprites.createSnapshotBuffer({ delay: INTERPOLATION_DELAY_MS, extrapolate: 1.15 });
     let selfRender = null;
     let cameraRender = null;
     let viewportSize = { width: 1, height: 1, dpr: 1 };
@@ -185,6 +187,7 @@
     const onboarding = document.getElementById('onboarding');
     const hud = document.getElementById('hud');
     const joinMessage = document.getElementById('joinMessage');
+    const networkDiagnostics = document.getElementById('networkDiagnostics');
     const joystick = document.getElementById('joystick');
     const knob = document.getElementById('knob');
     const viewCanvas = document.getElementById('viewCanvas');
@@ -211,6 +214,12 @@
     let lastPlayerUiUpdate = 0;
     let lastStateSeq = -1;
     let lastEffectsHtml = '';
+    let diagnosticFrameCount = 0;
+    let diagnosticWindowStartedAt = performance.now();
+    let pingMs = null;
+    let jitterMs = null;
+    let lastPingMs = null;
+    let diagnosticPingTimer = null;
     mapImage.onload = () => {
       mapReady = true;
     };
@@ -237,9 +246,51 @@
       joinMessage.classList.toggle('show', !!message);
     }
 
+    function updateDiagnostics(now = performance.now()) {
+      diagnosticFrameCount += 1;
+      const elapsed = now - diagnosticWindowStartedAt;
+      if (elapsed < 1000) return;
+      const fps = Math.round((diagnosticFrameCount * 1000) / elapsed);
+      diagnosticFrameCount = 0;
+      diagnosticWindowStartedAt = now;
+      const pingText = pingMs == null ? '--' : `${Math.round(pingMs)}ms`;
+      const jitterText = jitterMs == null ? '--' : `${Math.round(jitterMs)}ms`;
+      networkDiagnostics.textContent = `FPS ${fps} · Ping ${pingText} · Jitter ${jitterText}`;
+      networkDiagnostics.classList.toggle('warn', fps < 45 || (pingMs != null && pingMs > 120) || (jitterMs != null && jitterMs > 35));
+    }
+
+    function measureNetwork() {
+      if (!socket.connected) return;
+      const startedAt = performance.now();
+      socket.timeout(1800).emit('diagnostic:ping', Date.now(), (error) => {
+        if (error) return;
+        const sample = performance.now() - startedAt;
+        pingMs = pingMs == null ? sample : pingMs * 0.72 + sample * 0.28;
+        if (lastPingMs != null) {
+          const delta = Math.abs(sample - lastPingMs);
+          jitterMs = jitterMs == null ? delta : jitterMs * 0.72 + delta * 0.28;
+        }
+        lastPingMs = sample;
+      });
+    }
+
+    function startNetworkDiagnostics() {
+      measureNetwork();
+      if (!diagnosticPingTimer) diagnosticPingTimer = setInterval(measureNetwork, 2000);
+    }
+
     socket.on('connect', () => {
       const resumeToken = localStorage.getItem(PLAYER_TOKEN_KEY);
       if (resumeToken) socket.emit('player:resume', { resumeToken });
+      startNetworkDiagnostics();
+    });
+
+    socket.on('disconnect', () => {
+      networkDiagnostics.textContent = 'Mất kết nối · đang thử kết nối lại…';
+    });
+
+    socket.on('connect_error', () => {
+      if (!myId) showJoinMessage('Không thể kết nối tới phòng. Vui lòng kiểm tra mạng và thử lại.');
     });
 
     function hexToRgb(hex) {
@@ -696,6 +747,8 @@
     }
 
     function renderViewport() {
+      const frameNow = performance.now();
+      updateDiagnostics(frameNow);
       const w = viewportSize.width;
       const h = viewportSize.height;
       viewCtx.clearRect(0, 0, w, h);
@@ -719,12 +772,13 @@
         return;
       }
 
-      const nowTs = performance.now();
+      const nowTs = frameNow;
       const dt = lastFrameTs ? Math.min(0.05, (nowTs - lastFrameTs) / 1000) : 0.016;
       lastFrameTs = nowTs;
-      if (!selfRender) selfRender = { x: subjectInterp.x, y: subjectInterp.y, radius: subjectInterp.radius };
-      const dxs = subjectInterp.x - selfRender.x;
-      const dys = subjectInterp.y - selfRender.y;
+      const prediction = predictedSelfPosition(subjectInterp, serverMe);
+      if (!selfRender) selfRender = { x: prediction.x, y: prediction.y, radius: subjectInterp.radius };
+      const dxs = prediction.x - selfRender.x;
+      const dys = prediction.y - selfRender.y;
       if (dxs * dxs + dys * dys > 300 * 300) {
         selfRender.x = subjectInterp.x;
         selfRender.y = subjectInterp.y;
@@ -795,7 +849,12 @@
       if (me.alive) {
         const myCells = playerCells(interpMe).slice().sort((a, b) => a.radius - b.radius);
         for (const cell of myCells) {
-          const { sp, sr } = drawCell(viewCtx, me, cell, camera, { highlight: true });
+          const predictedCell = {
+            ...cell,
+            x: cell.x + (selfRender.x - subjectInterp.x),
+            y: cell.y + (selfRender.y - subjectInterp.y),
+          };
+          const { sp, sr } = drawCell(viewCtx, me, predictedCell, camera, { highlight: true });
           drawNameInsideCell(viewCtx, me.name, sp.x, sp.y, sr);
         }
       }
@@ -811,6 +870,27 @@
     let controlTimer = null;
 
     let lastControl = { x: 999999, y: 999999 };
+    let hasControlTarget = false;
+
+    function predictedSelfPosition(subject, serverPlayer) {
+      if (!hasControlTarget || !serverPlayer?.alive) return { x: subject.x, y: subject.y };
+      const dx = lastControl.x - subject.x;
+      const dy = lastControl.y - subject.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 1) return { x: subject.x, y: subject.y };
+      const cells = playerCells(serverPlayer);
+      const representative = cells.length
+        ? cells.reduce((largest, cell) => cell.mass > largest.mass ? cell : largest, cells[0])
+        : { mass: serverPlayer.mass || 100 };
+      const size = Math.max(1, Math.floor(Math.sqrt(100 * Math.max(1, representative.mass || 100))));
+      const unitsPerSecond = ((30 * 1.6) / Math.pow(size, 0.32)) * 1.2 * 30;
+      const leadSeconds = Math.min(0.18, (INTERPOLATION_DELAY_MS + Math.min(180, pingMs || 0) * 0.5) / 1000);
+      const lead = Math.min(distance, unitsPerSecond * leadSeconds);
+      return {
+        x: subject.x + (dx / distance) * lead,
+        y: subject.y + (dy / distance) * lead,
+      };
+    }
 
     function cameraMe() {
       const serverMe = state?.players?.find(p => p.id === myId);
@@ -843,6 +923,7 @@
       if (Math.abs(wx - lastControl.x) < 2 && Math.abs(wy - lastControl.y) < 2) return;
       lastControl.x = wx;
       lastControl.y = wy;
+      hasControlTarget = true;
       socket.emit('control', { x: wx, y: wy });
     }
 
@@ -859,6 +940,7 @@
         const len = Math.hypot(joystickDir.x, joystickDir.y);
         if (len < 0.05) {
           emitControlTarget(me.x, me.y);
+          hasControlTarget = false;
           return;
         }
         emitControlTarget(
@@ -987,6 +1069,8 @@
         emitAction('eject');
       }
     });
+
+    socket.connect();
 
   </script>
 </body>

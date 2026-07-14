@@ -963,6 +963,15 @@ body.player-playing .status-card .sub {
 }
 body.player-playing .status-card h2 { font-size: 16px; }
 body.player-playing .status-card .sub { font-size: 11px; }
+.network-diagnostics {
+  margin-top: 5px;
+  color: #527867;
+  font-size: 10px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.network-diagnostics.warn { color: #b4533f; }
 body.player-playing .score-value {
   font-size: 26px;
   line-height: 1;

@@ -115,7 +115,7 @@
   <script src="/game-sprites.js?v=20260714-2"></script>
   <script src="/socket.io/socket.io.js"></script>
   <script>
-    const socket = io();
+    const socket = io({ autoConnect: false });
     const hostBody = document.getElementById('hostBody');
     const HOST_TOKEN_KEY = 'mlnGameHostDeviceToken';
     const hostAuthGate = document.getElementById('hostAuthGate');
@@ -695,6 +695,7 @@
     };
 
     applyPanelVisibility();
+    socket.connect();
   </script>
 </body>
 </html>
