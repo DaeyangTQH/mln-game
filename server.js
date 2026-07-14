@@ -128,6 +128,7 @@ const EFFECT_MS = 15 * 1000;
 const CAPTURE_DURATION_MS = 5 * 1000;
 const CAPTURE_RADIUS = 150;
 const CAPTURE_REWARD_INTERVAL_MS = 10 * 1000;
+const CAPTURE_REWARD_LEVEL_INTERVAL_MS = 60 * 1000;
 const CAPTURE_REWARD_BASE_POINTS = 50;
 const CAPTURE_MAX_REWARD_LEVEL = 15;
 
@@ -151,6 +152,7 @@ function createCapturePoints() {
     capturingPlayerId: null,
     progressMs: 0,
     contested: false,
+    decaying: false,
     enteredAt: {},
   }));
 }
@@ -220,7 +222,6 @@ function createGame(opts = {}) {
     topLeaderId: null,
     topLeaderSince: 0,
     events: [],
-    votes: {},
     metrics: {
       concentration: 0,
       topShare: 0,
@@ -287,7 +288,6 @@ function updatePhaseByTime() {
   if (game.phase !== next.phase) {
     game.phase = next.phase;
     game.phaseName = next.name;
-    if (game.phase === 4) game.votes = {};
     addEvent(`Giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
   }
 }
@@ -739,6 +739,7 @@ function ejectMass(p) {
 function killPlayer(p) {
   p.alive = false;
   p.cells = [];
+  p.score = PLAYER_START_MASS;
   p.respawnAt = Date.now() + 4200;
   p.monopolySupervised = false;
   p.monopolyPenaltyDueAt = 0;
@@ -754,25 +755,37 @@ function resetCaptureAttempt(point) {
   point.capturingPlayerId = null;
   point.progressMs = 0;
   point.contested = false;
+  point.decaying = false;
+}
+
+function captureRewardLevel() {
+  return Math.min(
+    CAPTURE_MAX_REWARD_LEVEL,
+    Math.floor(elapsedMs() / CAPTURE_REWARD_LEVEL_INTERVAL_MS) + 1,
+  );
+}
+
+function addCaptureReward(player, points) {
+  if (!player?.alive || points <= 0) return 0;
+  addScore(player, points);
+  const cell = largestCell(player);
+  const massGain = points;
+  if (cell) cell.mass += massGain;
+  syncLegacyFields(player);
+  return massGain;
 }
 
 function grantCaptureReward(point, now) {
-  const owner = point.ownerPlayerId && game.players[point.ownerPlayerId];
-  if (!owner?.alive) {
-    point.lastRewardAt = now;
-    return;
-  }
   if (!point.lastRewardAt || now - point.lastRewardAt < CAPTURE_REWARD_INTERVAL_MS) return;
   const rewardCount = Math.floor((now - point.lastRewardAt) / CAPTURE_REWARD_INTERVAL_MS);
   point.lastRewardAt += rewardCount * CAPTURE_REWARD_INTERVAL_MS;
-  let reward = 0;
-  for (let i = 0; i < rewardCount && point.rewardLevel < CAPTURE_MAX_REWARD_LEVEL; i += 1) {
-    point.rewardLevel += 1;
-    reward += point.rewardLevel * CAPTURE_REWARD_BASE_POINTS;
-  }
-  if (reward <= 0) return;
-  addScore(owner, reward);
-  notifyPlayer(owner.id, `${point.name} · mốc ${point.rewardLevel}: +${reward} điểm`, 'success');
+  point.rewardLevel = captureRewardLevel();
+  const reward = rewardCount * point.rewardLevel * CAPTURE_REWARD_BASE_POINTS;
+
+  const owner = point.ownerPlayerId && game.players[point.ownerPlayerId];
+  if (!owner?.alive || reward <= 0) return;
+  const massGain = addCaptureReward(owner, reward);
+  notifyPlayer(owner.id, `${point.name} · mốc ${point.rewardLevel}: +${reward} điểm, +${massGain} mass`, 'success');
 }
 
 function updateCapturePoints() {
@@ -793,9 +806,7 @@ function updateCapturePoints() {
 
     if (point.capturingPlayerId) {
       const capturer = game.players[point.capturingPlayerId];
-      if (!capturer || !playerInsideCapturePoint(capturer, point)) {
-        resetCaptureAttempt(point);
-      }
+      if (!capturer) resetCaptureAttempt(point);
     }
 
     if (!point.capturingPlayerId) {
@@ -808,9 +819,20 @@ function updateCapturePoints() {
     const capturer = point.capturingPlayerId && game.players[point.capturingPlayerId];
     if (!capturer) {
       point.contested = false;
+      point.decaying = false;
       continue;
     }
 
+    const capturerInside = playerInsideCapturePoint(capturer, point);
+    if (!capturerInside) {
+      point.contested = false;
+      point.decaying = true;
+      point.progressMs = Math.max(0, point.progressMs - TICK_MS);
+      if (point.progressMs <= 0) resetCaptureAttempt(point);
+      continue;
+    }
+
+    point.decaying = false;
     point.contested = occupants.some(player => player.id !== capturer.id);
     if (point.contested) continue;
 
@@ -824,9 +846,14 @@ function updateCapturePoints() {
     point.ownerColor = capturer.color;
     point.capturedAt = now;
     point.lastRewardAt = now;
-    point.rewardLevel = 1;
-    addScore(capturer, CAPTURE_REWARD_BASE_POINTS);
-    notifyPlayer(capturer.id, `Chiếm ${point.name} · mốc 1: +${CAPTURE_REWARD_BASE_POINTS} điểm`, 'success');
+    point.rewardLevel = captureRewardLevel();
+    const captureReward = point.rewardLevel * CAPTURE_REWARD_BASE_POINTS;
+    const massGain = addCaptureReward(capturer, captureReward);
+    notifyPlayer(
+      capturer.id,
+      `Chiếm ${point.name} · mốc ${point.rewardLevel}: +${captureReward} điểm, +${massGain} mass; tiếp tục nhận sau mỗi 10 giây`,
+      'success',
+    );
     const wasStolen = previousOwnerId && previousOwnerId !== capturer.id;
     const message = wasStolen
       ? `${capturer.name.toUpperCase()} ĐÃ CƯỚP ${point.name.toUpperCase()} TỪ ${String(previousOwnerName || 'NGƯỜI CHƠI KHÁC').toUpperCase()}!`
@@ -1200,7 +1227,6 @@ function nextPhase() {
     4: 'Độc quyền nhà nước',
   };
   game.phaseName = names[game.phase];
-  if (game.phase === 4) game.votes = {};
   addEvent(`Chuyển sang giai đoạn ${game.phase}: ${game.phaseName}`, 'phase');
 }
 
@@ -1368,9 +1394,6 @@ function publicState(includeResources = true) {
       alive: p.alive,
     }));
 
-  const voteCounts = { A: 0, B: 0, C: 0 };
-  for (const option of Object.values(game.votes)) voteCounts[option] += 1;
-
   const elapsed = elapsedMs();
   const remainingMs = game.gameStarted && game.startedAt
     ? Math.max(0, game.sessionDurationMs - elapsed)
@@ -1448,25 +1471,27 @@ function publicState(includeResources = true) {
         capturingPlayerName: capturer?.name || null,
         capturingColor: capturer?.color || null,
         progress,
-        remainingMs: Math.max(0, CAPTURE_DURATION_MS - point.progressMs),
+        remainingMs: point.decaying
+          ? Math.max(0, point.progressMs)
+          : Math.max(0, CAPTURE_DURATION_MS - point.progressMs),
         contested: point.contested,
+        decaying: point.decaying,
         rewardBasePoints: CAPTURE_REWARD_BASE_POINTS,
         rewardLevel: point.rewardLevel,
         maxRewardLevel: CAPTURE_MAX_REWARD_LEVEL,
         nextRewardPoints: point.rewardLevel < CAPTURE_MAX_REWARD_LEVEL
-          ? (point.rewardLevel + 1) * CAPTURE_REWARD_BASE_POINTS
-          : 0,
+          ? Math.min(CAPTURE_MAX_REWARD_LEVEL, Math.floor(elapsed / CAPTURE_REWARD_LEVEL_INTERVAL_MS) + 1) * CAPTURE_REWARD_BASE_POINTS
+          : CAPTURE_MAX_REWARD_LEVEL * CAPTURE_REWARD_BASE_POINTS,
         rewardIntervalMs: CAPTURE_REWARD_INTERVAL_MS,
         nextRewardMs: point.ownerPlayerId && point.lastRewardAt
           ? Math.max(0, CAPTURE_REWARD_INTERVAL_MS - (Date.now() - point.lastRewardAt))
           : null,
-        status: point.contested ? 'contested' : point.capturingPlayerId ? 'capturing' : point.ownerPlayerId ? 'captured' : 'neutral',
+        status: point.contested ? 'contested' : point.decaying ? 'decaying' : point.capturingPlayerId ? 'capturing' : point.ownerPlayerId ? 'captured' : 'neutral',
       };
     }),
     leaderboard,
     events: game.events,
     metrics: game.metrics,
-    voteCounts,
     playerCount: Object.keys(game.players).length,
     lan: cachedLan,
     preferredLan: cachedPreferredLan,
@@ -1572,13 +1597,6 @@ io.on('connection', (socket) => {
     if (action === 'eject') ejectMass(p);
   });
 
-  socket.on('vote', ({ option }) => {
-    const p = game.players[socket.id];
-    if (!p || !['A', 'B', 'C'].includes(option)) return;
-    game.votes[socket.id] = option;
-    addEvent(`${p.name} vote phương án ${option}`, 'vote');
-  });
-
   socket.on('hostAction', (payload) => {
     if (!isAuthorizedHost(socket)) {
       socket.emit('host:denied', { code: 'NOT_AUTHORIZED', message: 'Bạn không có quyền Host.' });
@@ -1655,7 +1673,6 @@ io.on('connection', (socket) => {
     if (game.players[socket.id]) {
       addEvent(`${game.players[socket.id].name} rời thị trường`, 'warn');
       delete game.players[socket.id];
-      delete game.votes[socket.id];
     }
   });
 });
